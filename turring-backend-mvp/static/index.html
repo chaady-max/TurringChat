@@ -12,6 +12,12 @@
     input[type="text"] { flex: 1; padding: 8px; }
     .stats { margin-top: 10px; font-size: 14px; color: #444; display: flex; gap: 8px; flex-wrap: wrap; }
     .badge { display: inline-block; padding: 4px 8px; border: 1px solid #ccc; border-radius: 6px; background: #fff; }
+
+    /* tiny session panel */
+    .panel { margin-top: 10px; border: 1px solid #ddd; border-radius: 8px; background: #fff; padding: 10px; max-width: 260px; }
+    .panel h3 { margin: 0 0 6px 0; font-size: 15px; color: #333; }
+    .panel .kv { display: flex; justify-content: space-between; margin-top: 4px; font-size: 14px; }
+
     /* timer colors */
     .timer-green  { background: #e6f6ea; border-color: #8ad1a3; color: #1f6b3a; }
     .timer-orange { background: #fff1e0; border-color: #f3b46a; color: #8a4b00; }
@@ -26,6 +32,13 @@
     <span id="turnBadge" class="badge">Turn left: <span id="turnLeft">—</span>s</span>
     <span class="badge">Turn: <span id="turn">—</span></span>
     <span class="badge">Commit: <code id="commitHash">—</code></span>
+  </div>
+
+  <!-- Session box -->
+  <div id="sessionBox" class="panel">
+    <h3>Session</h3>
+    <div class="kv"><span>Games played</span><strong id="sessGames">0</strong></div>
+    <div class="kv"><span>Credits</span><strong id="sessCredits">0</strong></div>
   </div>
 
   <div id="typing" class="stats" style="min-height:22px;color:#666"></div>
@@ -56,6 +69,22 @@ const msgEl       = document.getElementById('msg');
 const sendBtn     = document.getElementById('send');
 const turnBadge   = document.getElementById('turnBadge');
 
+// session elements
+const sessGamesEl   = document.getElementById('sessGames');
+const sessCreditsEl = document.getElementById('sessCredits');
+
+// in-tab session counters (persist in this tab)
+let sessGames   = Number(sessionStorage.getItem('sessGames') || 0);
+let sessCredits = Number(sessionStorage.getItem('sessCredits') || 0);
+function updateSessionUI() {
+  sessGamesEl.textContent = String(sessGames);
+  sessCreditsEl.textContent = String(sessCredits);
+}
+updateSessionUI();
+
+// to avoid double-adding when multiple messages arrive, guard with a flag per match
+let endHandledForThisMatch = false;
+
 // default; will be overwritten by match_start.turn_seconds from server
 let MAX_TURN_SECONDS = 30;
 
@@ -82,6 +111,8 @@ function setTurnColor(secLeft) {
 
 document.getElementById('start').onclick = () => {
   if (ws) { try { ws.close(); } catch(e){} }
+  endHandledForThisMatch = false;
+
   ws = new WebSocket(`ws://${location.host}/ws/match`);
   ws.onopen = () => log('WS connected');
   ws.onclose = () => { log('WS closed'); typingEl.textContent=''; };
@@ -114,6 +145,18 @@ document.getElementById('start').onclick = () => {
       }
 
       if (data.type === 'end') {
+        if (!endHandledForThisMatch) {
+          endHandledForThisMatch = true;
+          // update session stats: count finished game and add this game's score delta
+          sessGames += 1;
+          const delta = Number(data.score_delta || 0);
+          sessCredits += delta;
+          // persist for this tab
+          sessionStorage.setItem('sessGames', String(sessGames));
+          sessionStorage.setItem('sessCredits', String(sessCredits));
+          updateSessionUI();
+        }
+
         log(`GAME END — reason=${data.reason} score_delta=${data.score_delta ?? 0}`);
         if (data.reveal) {
           log(`REVEAL: opponent=${data.reveal.opponent_type} nonce=${data.reveal.nonce} ts=${data.reveal.commit_ts}`);
