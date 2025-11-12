@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Turring Test — Dev Client</title>
+  <style>
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 20px; }
+    #log { border: 1px solid #ddd; padding: 10px; height: 300px; overflow-y: auto; white-space: pre-wrap; background: #fafafa; }
+    .row { margin-top: 10px; display: flex; gap: 8px; }
+    button { padding: 8px 12px; }
+    input[type="text"] { flex: 1; padding: 8px; }
+    .stats { margin-top: 10px; font-size: 14px; color: #444; display: flex; gap: 8px; flex-wrap: wrap; }
+    .badge { display: inline-block; padding: 4px 8px; border: 1px solid #ccc; border-radius: 6px; background: #fff; }
+    /* timer colors */
+    .timer-green  { background: #e6f6ea; border-color: #8ad1a3; color: #1f6b3a; }
+    .timer-orange { background: #fff1e0; border-color: #f3b46a; color: #8a4b00; }
+    .timer-red    { background: #ffe7e7; border-color: #f08f90; color: #8a1c1d; }
+  </style>
+</head>
+<body>
+  <h1>Turring Test — Dev Client</h1>
+
+  <div class="stats">
+    <span class="badge">Round left: <span id="roundLeft">—</span>s</span>
+    <span id="turnBadge" class="badge">Turn left: <span id="turnLeft">—</span>s</span>
+    <span class="badge">Turn: <span id="turn">—</span></span>
+    <span class="badge">Commit: <code id="commitHash">—</code></span>
+  </div>
+
+  <div id="typing" class="stats" style="min-height:22px;color:#666"></div>
+
+  <div id="log"></div>
+
+  <div class="row">
+    <input id="msg" type="text" placeholder="Type message… (Enter to send)" />
+    <button id="send">Send</button>
+  </div>
+
+  <div class="row">
+    <button id="guessHuman">Guess HUMAN</button>
+    <button id="guessAI">Guess AI</button>
+    <button id="start" style="margin-left:auto;">Start Match</button>
+    <button id="state">Get State</button>
+  </div>
+
+<script>
+let ws = null;
+const logEl = document.getElementById('log');
+const roundLeftEl = document.getElementById('roundLeft');
+const turnLeftEl  = document.getElementById('turnLeft');
+const turnEl      = document.getElementById('turn');
+const commitEl    = document.getElementById('commitHash');
+const typingEl    = document.getElementById('typing');
+const msgEl       = document.getElementById('msg');
+const sendBtn     = document.getElementById('send');
+const turnBadge   = document.getElementById('turnBadge');
+
+// default; will be overwritten by match_start.turn_seconds from server
+let MAX_TURN_SECONDS = 30;
+
+function log(line) {
+  const atBottom = logEl.scrollTop + logEl.clientHeight >= logEl.scrollHeight - 5;
+  logEl.textContent += line + "\n";
+  if (atBottom) logEl.scrollTop = logEl.scrollHeight;
+}
+
+function setTurnColor(secLeft) {
+  // color bands: [20..30]=green, [10..20)=orange, [0..10)=red
+  // generalized to any MAX_TURN_SECONDS: last 10s red, last 20s orange, else green
+  turnBadge.classList.remove('timer-green','timer-orange','timer-red');
+  const redThreshold    = Math.max(0, MAX_TURN_SECONDS - 10);
+  const orangeThreshold = Math.max(0, MAX_TURN_SECONDS - 20);
+  if (secLeft > redThreshold) {
+    turnBadge.classList.add('timer-green');
+  } else if (secLeft > orangeThreshold) {
+    turnBadge.classList.add('timer-orange');
+  } else {
+    turnBadge.classList.add('timer-red');
+  }
+}
+
+document.getElementById('start').onclick = () => {
+  if (ws) { try { ws.close(); } catch(e){} }
+  ws = new WebSocket(`ws://${location.host}/ws/match`);
+  ws.onopen = () => log('WS connected');
+  ws.onclose = () => { log('WS closed'); typingEl.textContent=''; };
+  ws.onmessage = ev => {
+    try {
+      const data = JSON.parse(ev.data);
+
+      if (data.type === 'match_start') {
+        // take max turn seconds from server (keeps UI in sync with backend)
+        if (typeof data.turn_seconds === 'number') MAX_TURN_SECONDS = data.turn_seconds;
+        commitEl.textContent = data.commit_hash;
+        log(`Match started. Opponent hidden. You are A. (${data.round_seconds}s round / ${MAX_TURN_SECONDS}s turn)`);
+        setTurnColor(MAX_TURN_SECONDS);
+        turnLeftEl.textContent = MAX_TURN_SECONDS;
+      }
+
+      if (data.type === 'tick') {
+        roundLeftEl.textContent = data.round_left;
+        turnLeftEl.textContent  = data.turn_left;
+        turnEl.textContent      = data.turn;
+        setTurnColor(Number(data.turn_left || 0));
+      }
+
+      if (data.type === 'typing') {
+        typingEl.textContent = data.on ? 'B is typing…' : '';
+      }
+
+      if (data.type === 'chat') {
+        log(`${data.from_}: ${data.text}`);
+      }
+
+      if (data.type === 'end') {
+        log(`GAME END — reason=${data.reason} score_delta=${data.score_delta ?? 0}`);
+        if (data.reveal) {
+          log(`REVEAL: opponent=${data.reveal.opponent_type} nonce=${data.reveal.nonce} ts=${data.reveal.commit_ts}`);
+          log(`Verify: sha256(opponent|nonce|ts) == commit (${commitEl.textContent})`);
+        }
+        typingEl.textContent = '';
+      }
+
+      if (data.type === 'state') {
+        log(`STATE: opponent(hidden) round_left=${data.round_left} turn_left=${data.turn_left} turn=${data.turn}`);
+        setTurnColor(Number(data.turn_left || 0));
+      }
+    } catch (e) {
+      log('parse error: ' + e);
+    }
+  };
+};
+
+// click to send
+sendBtn.onclick = () => {
+  if (!ws) return;
+  const v = msgEl.value.trim();
+  if (!v) return;
+  ws.send(JSON.stringify({type: 'chat', text: v}));
+  log(`A: ${v}`);
+  msgEl.value = '';
+  msgEl.focus();
+};
+
+// ENTER to send
+msgEl.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    sendBtn.click();
+  }
+});
+
+document.getElementById('guessHuman').onclick = () => {
+  if (!ws) return;
+  ws.send(JSON.stringify({type: 'guess', guess: 'HUMAN'}));
+};
+
+document.getElementById('guessAI').onclick = () => {
+  if (!ws) return;
+  ws.send(JSON.stringify({type: 'guess', guess: 'AI'}));
+};
+
+document.getElementById('state').onclick = () => {
+  if (!ws) return;
+  ws.send(JSON.stringify({type: 'state'}));
+};
+</script>
+</body>
+</html>
