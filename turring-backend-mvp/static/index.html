@@ -13,8 +13,8 @@
     .stats { margin-top: 10px; font-size: 14px; color: #444; display: flex; gap: 8px; flex-wrap: wrap; }
     .badge { display: inline-block; padding: 4px 8px; border: 1px solid #ccc; border-radius: 6px; background: #fff; }
 
-    /* tiny session panel */
-    .panel { margin-top: 10px; border: 1px solid #ddd; border-radius: 8px; background: #fff; padding: 10px; max-width: 260px; }
+    /* small panels */
+    .panel { margin-top: 10px; border: 1px solid #ddd; border-radius: 8px; background: #fff; padding: 10px; max-width: 360px; }
     .panel h3 { margin: 0 0 6px 0; font-size: 15px; color: #333; }
     .panel .kv { display: flex; justify-content: space-between; margin-top: 4px; font-size: 14px; }
 
@@ -22,6 +22,8 @@
     .timer-green  { background: #e6f6ea; border-color: #8ad1a3; color: #1f6b3a; }
     .timer-orange { background: #fff1e0; border-color: #f3b46a; color: #8a4b00; }
     .timer-red    { background: #ffe7e7; border-color: #f08f90; color: #8a1c1d; }
+
+    .disabled { opacity: 0.6; pointer-events: none; }
   </style>
 </head>
 <body>
@@ -32,17 +34,30 @@
     <span id="turnBadge" class="badge">Turn left: <span id="turnLeft">—</span>s</span>
     <span class="badge">Turn: <span id="turn">—</span></span>
     <span class="badge">Commit: <code id="commitHash">—</code></span>
+    <span class="badge">Pool: <span id="poolCount">0</span></span>
+    <span class="badge">Version: <span id="appVersion">—</span></span>
   </div>
 
   <!-- Session box -->
-  <div id="sessionBox" class="panel">
+  <div class="panel" id="sessionBox">
     <h3>Session</h3>
     <div class="kv"><span>Games played</span><strong id="sessGames">0</strong></div>
     <div class="kv"><span>Credits</span><strong id="sessCredits">0</strong></div>
   </div>
 
-  <div id="typing" class="stats" style="min-height:22px;color:#666"></div>
+  <!-- Pool box -->
+  <div class="panel" id="poolBox">
+    <h3>Matchmaking Pool</h3>
+    <div class="kv"><span>Status</span><strong id="poolStatus">Not in pool</strong></div>
+    <div class="kv"><span>People in pool</span><strong id="poolCountText">0</strong></div>
+    <div class="row">
+      <button id="joinPoolBtn">Get me in the pool</button>
+      <button id="leavePoolBtn" class="disabled">Leave pool</button>
+    </div>
+    <small style="color:#666;display:block;margin-top:6px">Join first to unlock Start Match. Each browser tab counts as one human.</small>
+  </div>
 
+  <div id="typing" class="stats" style="min-height:22px;color:#666"></div>
   <div id="log"></div>
 
   <div class="row">
@@ -53,7 +68,7 @@
   <div class="row">
     <button id="guessHuman">Guess HUMAN</button>
     <button id="guessAI">Guess AI</button>
-    <button id="start" style="margin-left:auto;">Start Match</button>
+    <button id="start" class="disabled" style="margin-left:auto;">Start Match</button>
     <button id="state">Get State</button>
   </div>
 
@@ -69,11 +84,18 @@ const msgEl       = document.getElementById('msg');
 const sendBtn     = document.getElementById('send');
 const turnBadge   = document.getElementById('turnBadge');
 
-// session elements
+// pool + session UI
+const poolCountEl = document.getElementById('poolCount');
+const poolCountText = document.getElementById('poolCountText');
+const poolStatusEl = document.getElementById('poolStatus');
+const joinPoolBtn = document.getElementById('joinPoolBtn');
+const leavePoolBtn = document.getElementById('leavePoolBtn');
+const startBtn = document.getElementById('start');
+const appVersionEl = document.getElementById('appVersion');
+
 const sessGamesEl   = document.getElementById('sessGames');
 const sessCreditsEl = document.getElementById('sessCredits');
 
-// in-tab session counters (persist in this tab)
 let sessGames   = Number(sessionStorage.getItem('sessGames') || 0);
 let sessCredits = Number(sessionStorage.getItem('sessCredits') || 0);
 function updateSessionUI() {
@@ -82,10 +104,10 @@ function updateSessionUI() {
 }
 updateSessionUI();
 
-// to avoid double-adding when multiple messages arrive, guard with a flag per match
-let endHandledForThisMatch = false;
+// token for pool membership
+let myToken = sessionStorage.getItem('poolToken') || null;
 
-// default; will be overwritten by match_start.turn_seconds from server
+// default; overwritten by server
 let MAX_TURN_SECONDS = 30;
 
 function log(line) {
@@ -95,8 +117,6 @@ function log(line) {
 }
 
 function setTurnColor(secLeft) {
-  // color bands: [20..30]=green, [10..20)=orange, [0..10)=red
-  // generalized to any MAX_TURN_SECONDS: last 10s red, last 20s orange, else green
   turnBadge.classList.remove('timer-green','timer-orange','timer-red');
   const redThreshold    = Math.max(0, MAX_TURN_SECONDS - 10);
   const orangeThreshold = Math.max(0, MAX_TURN_SECONDS - 20);
@@ -109,11 +129,65 @@ function setTurnColor(secLeft) {
   }
 }
 
-document.getElementById('start').onclick = () => {
-  if (ws) { try { ws.close(); } catch(e){} }
-  endHandledForThisMatch = false;
+async function fetchPoolCount() {
+  try {
+    const r = await fetch('/pool/count');
+    const j = await r.json();
+    poolCountEl.textContent = j.count;
+    poolCountText.textContent = j.count;
+  } catch {}
+}
 
-  ws = new WebSocket(`ws://${location.host}/ws/match`);
+// pool join/leave
+joinPoolBtn.onclick = async () => {
+  try {
+    const r = await fetch('/pool/join', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({token: myToken})});
+    const j = await r.json();
+    if (j.ok) {
+      myToken = j.token;
+      sessionStorage.setItem('poolToken', myToken);
+      poolStatusEl.textContent = 'In pool';
+      joinPoolBtn.classList.add('disabled');
+      leavePoolBtn.classList.remove('disabled');
+      startBtn.classList.remove('disabled');
+      await fetchPoolCount();
+      log('Joined pool.');
+    }
+  } catch (e) {
+    log('Pool join failed: ' + e);
+  }
+};
+
+leavePoolBtn.onclick = async () => {
+  try {
+    await fetch('/pool/leave', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({token: myToken})});
+  } catch {}
+  poolStatusEl.textContent = 'Not in pool';
+  leavePoolBtn.classList.add('disabled');
+  joinPoolBtn.classList.remove('disabled');
+  // Do not disable Start; but generally you should join again before starting
+  startBtn.classList.add('disabled');
+  fetchPoolCount();
+  log('Left pool.');
+};
+
+// poll pool count
+setInterval(fetchPoolCount, 2000);
+fetchPoolCount();
+
+// leave pool on unload
+window.addEventListener('beforeunload', () => {
+  if (myToken) {
+    navigator.sendBeacon('/pool/leave', JSON.stringify({token: myToken}));
+  }
+});
+
+// Start match: opens ws with token; server removes us from pool automatically
+startBtn.onclick = () => {
+  if (startBtn.classList.contains('disabled')) return;
+  if (ws) { try { ws.close(); } catch(e){} }
+  const qs = myToken ? ('?token=' + encodeURIComponent(myToken)) : '';
+  ws = new WebSocket(`ws://${location.host}/ws/match${qs}`);
   ws.onopen = () => log('WS connected');
   ws.onclose = () => { log('WS closed'); typingEl.textContent=''; };
   ws.onmessage = ev => {
@@ -123,10 +197,12 @@ document.getElementById('start').onclick = () => {
       if (data.type === 'match_start') {
         // take max turn seconds from server (keeps UI in sync with backend)
         if (typeof data.turn_seconds === 'number') MAX_TURN_SECONDS = data.turn_seconds;
-        commitEl.textContent = data.commit_hash;
+        if (data.commit_hash) commitEl.textContent = data.commit_hash;
+        if (data.version) appVersionEl.textContent = data.version;
         log(`Match started. Opponent hidden. You are A. (${data.round_seconds}s round / ${MAX_TURN_SECONDS}s turn)`);
         setTurnColor(MAX_TURN_SECONDS);
         turnLeftEl.textContent = MAX_TURN_SECONDS;
+        poolStatusEl.textContent = 'In match';
       }
 
       if (data.type === 'tick') {
@@ -145,24 +221,26 @@ document.getElementById('start').onclick = () => {
       }
 
       if (data.type === 'end') {
-        if (!endHandledForThisMatch) {
-          endHandledForThisMatch = true;
-          // update session stats: count finished game and add this game's score delta
-          sessGames += 1;
-          const delta = Number(data.score_delta || 0);
-          sessCredits += delta;
-          // persist for this tab
-          sessionStorage.setItem('sessGames', String(sessGames));
-          sessionStorage.setItem('sessCredits', String(sessCredits));
-          updateSessionUI();
-        }
+        const delta = Number(data.score_delta || 0);
+        sessGames += 1;
+        sessCredits += delta;
+        sessionStorage.setItem('sessGames', String(sessGames));
+        sessionStorage.setItem('sessCredits', String(sessCredits));
+        updateSessionUI();
 
-        log(`GAME END — reason=${data.reason} score_delta=${data.score_delta ?? 0}`);
+        log(`GAME END — reason=${data.reason} score_delta=${delta}`);
         if (data.reveal) {
           log(`REVEAL: opponent=${data.reveal.opponent_type} nonce=${data.reveal.nonce} ts=${data.reveal.commit_ts}`);
-          log(`Verify: sha256(opponent|nonce|ts) == commit (${commitEl.textContent})`);
+          if (commitEl.textContent && data.reveal.commit_ts) {
+            log(`Verify: sha256(opponent|nonce|ts) == commit (${commitEl.textContent})`);
+          }
         }
         typingEl.textContent = '';
+        poolStatusEl.textContent = 'Not in pool';
+        leavePoolBtn.classList.add('disabled');
+        joinPoolBtn.classList.remove('disabled');
+        startBtn.classList.add('disabled');
+        fetchPoolCount();
       }
 
       if (data.type === 'state') {
@@ -176,7 +254,7 @@ document.getElementById('start').onclick = () => {
 };
 
 // click to send
-sendBtn.onclick = () => {
+document.getElementById('send').onclick = () => {
   if (!ws) return;
   const v = msgEl.value.trim();
   if (!v) return;
@@ -190,7 +268,7 @@ sendBtn.onclick = () => {
 msgEl.addEventListener('keydown', (e) => {
   if (e.key === 'Enter') {
     e.preventDefault();
-    sendBtn.click();
+    document.getElementById('send').click();
   }
 });
 
