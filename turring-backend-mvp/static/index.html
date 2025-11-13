@@ -6,74 +6,83 @@
   <title>Turring Test — Dev Client</title>
   <style>
     body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 20px; }
-    #log { border: 1px solid #ddd; padding: 10px; height: 300px; overflow-y: auto; white-space: pre-wrap; background: #fafafa; }
-    .row { margin-top: 10px; display: flex; gap: 8px; }
+    #log { border: 1px solid #ddd; padding: 10px; height: 320px; overflow-y: auto; white-space: pre-wrap; background: #fafafa; }
+    .row { margin-top: 10px; display: flex; gap: 8px; flex-wrap: wrap; }
     button { padding: 8px 12px; }
     input[type="text"] { flex: 1; padding: 8px; }
-    .stats { margin-top: 10px; font-size: 14px; color: #444; display: flex; gap: 8px; flex-wrap: wrap; }
+    .stats { margin-top: 10px; font-size: 14px; color: #444; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
     .badge { display: inline-block; padding: 4px 8px; border: 1px solid #ccc; border-radius: 6px; background: #fff; }
-
-    /* small panels */
-    .panel { margin-top: 10px; border: 1px solid #ddd; border-radius: 8px; background: #fff; padding: 10px; max-width: 360px; }
-    .panel h3 { margin: 0 0 6px 0; font-size: 15px; color: #333; }
-    .panel .kv { display: flex; justify-content: space-between; margin-top: 4px; font-size: 14px; }
-
+    .counter { font-weight: 600; }
+    .pill { padding: 4px 8px; border-radius: 999px; background: #eee; }
     /* timer colors */
     .timer-green  { background: #e6f6ea; border-color: #8ad1a3; color: #1f6b3a; }
     .timer-orange { background: #fff1e0; border-color: #f3b46a; color: #8a4b00; }
     .timer-red    { background: #ffe7e7; border-color: #f08f90; color: #8a1c1d; }
-
-    .disabled { opacity: 0.6; pointer-events: none; }
+    /* overlay */
+    #overlay {
+      position: fixed; inset: 0; background: rgba(0,0,0,0.45);
+      display: none; align-items: center; justify-content: center; z-index: 20;
+    }
+    #overlay .box {
+      background: #fff; padding: 16px 18px; border-radius: 10px; box-shadow: 0 8px 24px rgba(0,0,0,0.2);
+      min-width: 280px; text-align: center;
+    }
+    #overlay .big { font-size: 18px; font-weight: 600; margin-bottom: 6px; }
+    #overlay .sub { font-size: 14px; color: #555; }
   </style>
 </head>
 <body>
   <h1>Turring Test — Dev Client</h1>
 
-  <div class="stats">
-    <span class="badge">Round left: <span id="roundLeft">—</span>s</span>
-    <span id="turnBadge" class="badge">Turn left: <span id="turnLeft">—</span>s</span>
-    <span class="badge">Turn: <span id="turn">—</span></span>
-    <span class="badge">Commit: <code id="commitHash">—</code></span>
-    <span class="badge">Pool: <span id="poolCount">0</span></span>
-    <span class="badge">Version: <span id="appVersion">—</span></span>
-  </div>
-
-  <!-- Session box -->
-  <div class="panel" id="sessionBox">
-    <h3>Session</h3>
-    <div class="kv"><span>Games played</span><strong id="sessGames">0</strong></div>
-    <div class="kv"><span>Credits</span><strong id="sessCredits">0</strong></div>
-  </div>
-
-  <!-- Pool box -->
-  <div class="panel" id="poolBox">
-    <h3>Matchmaking Pool</h3>
-    <div class="kv"><span>Status</span><strong id="poolStatus">Not in pool</strong></div>
-    <div class="kv"><span>People in pool</span><strong id="poolCountText">0</strong></div>
-    <div class="row">
-      <button id="joinPoolBtn">Get me in the pool</button>
-      <button id="leavePoolBtn" class="disabled">Leave pool</button>
-    </div>
-    <small style="color:#666;display:block;margin-top:6px">Join first to unlock Start Match. Each browser tab counts as one human.</small>
+  <div class="stats" style="gap:16px">
+    <div class="badge">Round left: <span id="roundLeft">—</span>s</div>
+    <div id="turnBadge" class="badge">Turn left: <span id="turnLeft">—</span>s</span></div>
+    <div class="badge">Turn: <span id="turn">—</span></div>
+    <div class="badge">Commit: <code id="commitHash">—</code></div>
+    <div class="badge">Pool: <span id="poolCount" class="counter">0</span></div>
+    <div class="badge">Session — Games: <span id="sessGames" class="counter">0</span>, Credits: <span id="sessCredits" class="counter">0</span></div>
   </div>
 
   <div id="typing" class="stats" style="min-height:22px;color:#666"></div>
+
   <div id="log"></div>
 
   <div class="row">
     <input id="msg" type="text" placeholder="Type message… (Enter to send)" />
-    <button id="send">Send</button>
+    <button id="send" disabled>Send</button>
   </div>
 
   <div class="row">
-    <button id="guessHuman">Guess HUMAN</button>
-    <button id="guessAI">Guess AI</button>
-    <button id="start" class="disabled" style="margin-left:auto;">Start Match</button>
-    <button id="state">Get State</button>
+    <button id="joinPool">Join Pool</button>
+    <button id="leavePool" disabled>Leave Pool</button>
+    <span class="pill">Token: <code id="myToken">—</code></span>
+  </div>
+
+  <div class="row">
+    <button id="guessHuman" disabled>Guess HUMAN</button>
+    <button id="guessAI" disabled>Guess AI</button>
+    <button id="start" disabled style="margin-left:auto;">Start Match</button>
+    <button id="state" disabled>Get State</button>
+  </div>
+
+  <div id="overlay">
+    <div class="box">
+      <div class="big">Matchmaking in progress…</div>
+      <div class="sub">Looking for an opponent (up to <span id="mmWindow">—</span>s).<br/>Time left: <span id="mmLeft">—</span>s</div>
+    </div>
   </div>
 
 <script>
 let ws = null;
+let myToken = localStorage.getItem('turring_token') || null;
+let sessionGames = 0;
+let sessionCredits = 0;
+let pendingTicket = null;
+let pollTimer = null;
+let poolPollTimer = null;
+let matchmakingDeadline = 0;
+
+// UI refs
 const logEl = document.getElementById('log');
 const roundLeftEl = document.getElementById('roundLeft');
 const turnLeftEl  = document.getElementById('turnLeft');
@@ -83,126 +92,218 @@ const typingEl    = document.getElementById('typing');
 const msgEl       = document.getElementById('msg');
 const sendBtn     = document.getElementById('send');
 const turnBadge   = document.getElementById('turnBadge');
-
-// pool + session UI
 const poolCountEl = document.getElementById('poolCount');
-const poolCountText = document.getElementById('poolCountText');
-const poolStatusEl = document.getElementById('poolStatus');
-const joinPoolBtn = document.getElementById('joinPoolBtn');
-const leavePoolBtn = document.getElementById('leavePoolBtn');
-const startBtn = document.getElementById('start');
-const appVersionEl = document.getElementById('appVersion');
+const sessGamesEl = document.getElementById('sessGames');
+const sessCredEl  = document.getElementById('sessCredits');
+const myTokenEl   = document.getElementById('myToken');
+const joinPoolBtn = document.getElementById('joinPool');
+const leavePoolBtn= document.getElementById('leavePool');
+const startBtn    = document.getElementById('start');
+const stateBtn    = document.getElementById('state');
+const guessHuman  = document.getElementById('guessHuman');
+const guessAI     = document.getElementById('guessAI');
+const overlay     = document.getElementById('overlay');
+const mmWindowEl  = document.getElementById('mmWindow');
+const mmLeftEl    = document.getElementById('mmLeft');
 
-const sessGamesEl   = document.getElementById('sessGames');
-const sessCreditsEl = document.getElementById('sessCredits');
-
-let sessGames   = Number(sessionStorage.getItem('sessGames') || 0);
-let sessCredits = Number(sessionStorage.getItem('sessCredits') || 0);
-function updateSessionUI() {
-  sessGamesEl.textContent = String(sessGames);
-  sessCreditsEl.textContent = String(sessCredits);
-}
-updateSessionUI();
-
-// token for pool membership
-let myToken = sessionStorage.getItem('poolToken') || null;
-
-// default; overwritten by server
+// timer coloring
 let MAX_TURN_SECONDS = 30;
+function setTurnColor(secLeft) {
+  turnBadge.classList.remove('timer-green','timer-orange','timer-red');
+  const redT    = Math.max(0, MAX_TURN_SECONDS - 10);
+  const orangeT = Math.max(0, MAX_TURN_SECONDS - 20);
+  if (secLeft > redT) turnBadge.classList.add('timer-green');
+  else if (secLeft > orangeT) turnBadge.classList.add('timer-orange');
+  else turnBadge.classList.add('timer-red');
+}
 
+// helper log
 function log(line) {
   const atBottom = logEl.scrollTop + logEl.clientHeight >= logEl.scrollHeight - 5;
   logEl.textContent += line + "\n";
   if (atBottom) logEl.scrollTop = logEl.scrollHeight;
 }
 
-function setTurnColor(secLeft) {
-  turnBadge.classList.remove('timer-green','timer-orange','timer-red');
-  const redThreshold    = Math.max(0, MAX_TURN_SECONDS - 10);
-  const orangeThreshold = Math.max(0, MAX_TURN_SECONDS - 20);
-  if (secLeft > redThreshold) {
-    turnBadge.classList.add('timer-green');
-  } else if (secLeft > orangeThreshold) {
-    turnBadge.classList.add('timer-orange');
-  } else {
-    turnBadge.classList.add('timer-red');
-  }
+// session stats updater
+function updateSession(delta = 0) {
+  sessionGamesEl.textContent = sessionGames;
+  sessionCredits += (delta || 0);
+  sessCredEl.textContent = sessionCredits;
 }
 
-async function fetchPoolCount() {
+// pool counter poller
+async function pollPool() {
   try {
     const r = await fetch('/pool/count');
     const j = await r.json();
-    poolCountEl.textContent = j.count;
-    poolCountText.textContent = j.count;
-  } catch {}
+    poolCountEl.textContent = j.count ?? 0;
+  } catch(e) {}
 }
 
-// pool join/leave
+// overlay control
+function showOverlay(windowSecs, leftSecs) {
+  mmWindowEl.textContent = Math.round(windowSecs);
+  mmLeftEl.textContent = Math.max(0, Math.round(leftSecs));
+  overlay.style.display = 'flex';
+}
+function hideOverlay() { overlay.style.display = 'none'; }
+
+// button state
+function setDuringMatchmaking(on) {
+  joinPoolBtn.disabled = on;
+  leavePoolBtn.disabled = on;
+  startBtn.disabled = on;
+  guessHuman.disabled = true;
+  guessAI.disabled = true;
+  stateBtn.disabled = true;
+  sendBtn.disabled = true;
+}
+function setDuringGame(on) {
+  joinPoolBtn.disabled = on;
+  leavePoolBtn.disabled = on;
+  startBtn.disabled = on;
+  guessHuman.disabled = !on? true : false;
+  guessAI.disabled = !on? true : false;
+  stateBtn.disabled = !on? true : false;
+  sendBtn.disabled = !on? true : false;
+}
+
+function resetUI() {
+  roundLeftEl.textContent = '—';
+  turnLeftEl.textContent  = '—';
+  turnEl.textContent      = '—';
+  commitEl.textContent    = '—';
+  typingEl.textContent    = '';
+  setTurnColor(MAX_TURN_SECONDS);
+}
+
+// initial token display
+if (myToken) {
+  myTokenEl.textContent = myToken;
+  leavePoolBtn.disabled = false;
+  startBtn.disabled = false;
+}
+
+poolPollTimer = setInterval(pollPool, 2000);
+pollPool();
+
+// join pool
 joinPoolBtn.onclick = async () => {
   try {
-    const r = await fetch('/pool/join', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({token: myToken})});
+    const r = await fetch('/pool/join', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify(myToken ? { token: myToken } : {})
+    });
     const j = await r.json();
     if (j.ok) {
       myToken = j.token;
-      sessionStorage.setItem('poolToken', myToken);
-      poolStatusEl.textContent = 'In pool';
-      joinPoolBtn.classList.add('disabled');
-      leavePoolBtn.classList.remove('disabled');
-      startBtn.classList.remove('disabled');
-      await fetchPoolCount();
+      localStorage.setItem('turring_token', myToken);
+      myTokenEl.textContent = myToken;
+      leavePoolBtn.disabled = false;
+      startBtn.disabled = false; // unlocked
       log('Joined pool.');
+      pollPool();
+    } else {
+      log('Join failed.');
     }
-  } catch (e) {
-    log('Pool join failed: ' + e);
+  } catch(e) {
+    log('Join error: ' + e);
   }
 };
 
+// leave pool
 leavePoolBtn.onclick = async () => {
   try {
-    await fetch('/pool/leave', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({token: myToken})});
-  } catch {}
-  poolStatusEl.textContent = 'Not in pool';
-  leavePoolBtn.classList.add('disabled');
-  joinPoolBtn.classList.remove('disabled');
-  // Do not disable Start; but generally you should join again before starting
-  startBtn.classList.add('disabled');
-  fetchPoolCount();
-  log('Left pool.');
+    if (!myToken) return;
+    await fetch('/pool/leave', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ token: myToken })
+    });
+    log('Left pool.');
+    pollPool();
+  } catch(e) {}
 };
 
-// poll pool count
-setInterval(fetchPoolCount, 2000);
-fetchPoolCount();
-
-// leave pool on unload
-window.addEventListener('beforeunload', () => {
-  if (myToken) {
-    navigator.sendBeacon('/pool/leave', JSON.stringify({token: myToken}));
+// start matchmaking
+startBtn.onclick = async () => {
+  if (!myToken) {
+    log('Join the pool first.');
+    return;
   }
-});
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    log('Already in a game.');
+    return;
+  }
+  resetUI();
+  setDuringMatchmaking(true);
+  try {
+    const r = await fetch('/match/request', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ token: myToken })
+    });
+    const j = await r.json();
+    pendingTicket = j.ticket;
+    const deadline = j.expires_at * 1000; // seconds -> ms (server used time.time() + window)
+    matchmakingDeadline = Date.now() + Math.max(0, j.expires_at - Math.floor(Date.now()/1000)) * 1000;
+    const windowSecs = Math.max(5, Math.round(j.expires_at - Math.floor(Date.now()/1000)));
+    showOverlay(windowSecs, windowSecs);
 
-// Start match: opens ws with token; server removes us from pool automatically
-startBtn.onclick = () => {
-  if (startBtn.classList.contains('disabled')) return;
-  if (ws) { try { ws.close(); } catch(e){} }
-  const qs = myToken ? ('?token=' + encodeURIComponent(myToken)) : '';
-  ws = new WebSocket(`ws://${location.host}/ws/match${qs}`);
-  ws.onopen = () => log('WS connected');
-  ws.onclose = () => { log('WS closed'); typingEl.textContent=''; };
+    // poll status
+    if (pollTimer) clearInterval(pollTimer);
+    pollTimer = setInterval(async () => {
+      try {
+        const rr = await fetch(`/match/status?ticket=${encodeURIComponent(pendingTicket)}`);
+        const sj = await rr.json();
+
+        // update overlay countdown
+        const tl = Math.max(0, Math.round((matchmakingDeadline - Date.now())/1000));
+        mmLeftEl.textContent = tl;
+
+        if (sj.status === 'ready_ai' || sj.status === 'ready_h2h') {
+          hideOverlay();
+          if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+          connectWS(sj.ws_url, sj.commit_hash);
+        } else if (sj.status === 'pending') {
+          // still waiting
+        } else if (sj.status === 'canceled' || sj.status === 'gone') {
+          hideOverlay();
+          if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+          setDuringMatchmaking(false);
+          log('Matchmaking canceled/gone.');
+        }
+      } catch(e) {
+        // ignore transient errors
+      }
+    }, 750);
+  } catch(e) {
+    setDuringMatchmaking(false);
+    hideOverlay();
+    log('Start matchmaking error: ' + e);
+  }
+};
+
+function connectWS(url, commitHash) {
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    try { ws.close(); } catch(e){}
+  }
+  commitEl.textContent = commitHash || '—';
+
+  const full = url.startsWith('ws') ? url : `ws://${location.host}${url}`;
+  ws = new WebSocket(full);
+  ws.onopen = () => { log('WS connected'); typingEl.textContent=''; setDuringGame(true); };
+  ws.onclose = () => { log('WS closed'); typingEl.textContent=''; setDuringGame(false); };
   ws.onmessage = ev => {
     try {
       const data = JSON.parse(ev.data);
 
       if (data.type === 'match_start') {
-        // take max turn seconds from server (keeps UI in sync with backend)
         if (typeof data.turn_seconds === 'number') MAX_TURN_SECONDS = data.turn_seconds;
-        if (data.commit_hash) commitEl.textContent = data.commit_hash;
-        if (data.version) appVersionEl.textContent = data.version;
-        log(`Match started. Opponent hidden. You are A. (${data.round_seconds}s round / ${MAX_TURN_SECONDS}s turn)`);
         setTurnColor(MAX_TURN_SECONDS);
         turnLeftEl.textContent = MAX_TURN_SECONDS;
-        poolStatusEl.textContent = 'In match';
+        log(`Match started. Opponent hidden. You are A. (${data.round_seconds}s round / ${MAX_TURN_SECONDS}s turn)`);
       }
 
       if (data.type === 'tick') {
@@ -220,42 +321,33 @@ startBtn.onclick = () => {
         log(`${data.from_}: ${data.text}`);
       }
 
-      if (data.type === 'end') {
-        const delta = Number(data.score_delta || 0);
-        sessGames += 1;
-        sessCredits += delta;
-        sessionStorage.setItem('sessGames', String(sessGames));
-        sessionStorage.setItem('sessCredits', String(sessCredits));
-        updateSessionUI();
-
-        log(`GAME END — reason=${data.reason} score_delta=${delta}`);
-        if (data.reveal) {
-          log(`REVEAL: opponent=${data.reveal.opponent_type} nonce=${data.reveal.nonce} ts=${data.reveal.commit_ts}`);
-          if (commitEl.textContent && data.reveal.commit_ts) {
-            log(`Verify: sha256(opponent|nonce|ts) == commit (${commitEl.textContent})`);
-          }
-        }
-        typingEl.textContent = '';
-        poolStatusEl.textContent = 'Not in pool';
-        leavePoolBtn.classList.add('disabled');
-        joinPoolBtn.classList.remove('disabled');
-        startBtn.classList.add('disabled');
-        fetchPoolCount();
-      }
-
       if (data.type === 'state') {
         log(`STATE: opponent(hidden) round_left=${data.round_left} turn_left=${data.turn_left} turn=${data.turn}`);
         setTurnColor(Number(data.turn_left || 0));
+      }
+
+      if (data.type === 'end') {
+        const delta = Number(data.score_delta || 0);
+        sessionGames += 1;
+        updateSession(delta);
+        log(`GAME END — reason=${data.reason} ${'winner' in data ? 'winner='+data.winner : ''} score_delta=${delta}`);
+        if (data.reveal) {
+          log(`REVEAL: opponent=${data.reveal.opponent_type} nonce=${data.reveal.nonce} ts=${data.reveal.commit_ts}`);
+          log(`Verify: sha256(opponent|nonce|ts) == commit (${commitEl.textContent})`);
+        }
+        typingEl.textContent = '';
+        setDuringGame(false);
+        startBtn.disabled = false; // allow new round
       }
     } catch (e) {
       log('parse error: ' + e);
     }
   };
-};
+}
 
 // click to send
-document.getElementById('send').onclick = () => {
-  if (!ws) return;
+sendBtn.onclick = () => {
+  if (!ws || ws.readyState !== WebSocket.OPEN) return;
   const v = msgEl.value.trim();
   if (!v) return;
   ws.send(JSON.stringify({type: 'chat', text: v}));
@@ -268,24 +360,33 @@ document.getElementById('send').onclick = () => {
 msgEl.addEventListener('keydown', (e) => {
   if (e.key === 'Enter') {
     e.preventDefault();
-    document.getElementById('send').click();
+    sendBtn.click();
   }
 });
 
-document.getElementById('guessHuman').onclick = () => {
-  if (!ws) return;
+guessHuman.onclick = () => {
+  if (!ws || ws.readyState !== WebSocket.OPEN) return;
   ws.send(JSON.stringify({type: 'guess', guess: 'HUMAN'}));
 };
 
-document.getElementById('guessAI').onclick = () => {
-  if (!ws) return;
+guessAI.onclick = () => {
+  if (!ws || ws.readyState !== WebSocket.OPEN) return;
   ws.send(JSON.stringify({type: 'guess', guess: 'AI'}));
 };
 
-document.getElementById('state').onclick = () => {
-  if (!ws) return;
+stateBtn.onclick = () => {
+  if (!ws || ws.readyState !== WebSocket.OPEN) return;
   ws.send(JSON.stringify({type: 'state'}));
 };
+
+// leave the pool when closing the tab
+window.addEventListener('beforeunload', async () => {
+  try {
+    if (myToken) {
+      navigator.sendBeacon('/pool/leave', JSON.stringify({ token: myToken }));
+    }
+  } catch(e) {}
+});
 </script>
 </body>
 </html>
