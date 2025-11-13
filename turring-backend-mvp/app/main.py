@@ -6,17 +6,18 @@ import random
 import asyncio
 import secrets
 import hashlib
-from typing import Optional, Literal, Dict
+from typing import Optional, Literal, Dict, Any
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Query, Body
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.websockets import WebSocketState
 
 # =========================
-# App version (for in-chat query)
+# App version (answers "what version are you")
 # =========================
-APP_VERSION = "3"
+APP_VERSION = "2"
 
 # --- .env support ---
 try:
@@ -25,7 +26,7 @@ try:
 except Exception:
     pass
 
-# --- Optional Redis import (kept for future multi-instance) ---
+# --- Optional Redis import (unused in MVP, reserved for scaling) ---
 try:
     import redis.asyncio as redis  # noqa: F401
 except Exception:
@@ -61,6 +62,10 @@ TURN_LIMIT_SECS = 30        # 30 seconds per turn
 SCORE_CORRECT = 100
 SCORE_WRONG = -200
 SCORE_TIMEOUT_WIN = 100
+
+# --- Option A (Env knob) ---
+H2H_PROB = float(os.getenv("H2H_PROB", "0.5"))           # 0.0..1.0
+MATCH_WINDOW_SECS = float(os.getenv("MATCH_WINDOW_SECS", "10"))
 
 Role = Literal["A", "B"]
 OpponentType = Literal["HUMAN", "AI"]
@@ -104,7 +109,6 @@ async def health():
 
 # ------------------------------------------------------------------------------
 # Pool API (HTTP): join / leave / count
-# Each browser tab can "join the pool" to be counted as available.
 # ------------------------------------------------------------------------------
 pool_tokens: set[str] = set()
 pool_lock = asyncio.Lock()
@@ -114,10 +118,8 @@ async def pool_count():
     async with pool_lock:
         return {"count": len(pool_tokens)}
 
-# --- replace these two in app/main.py ---
-
 @app.post("/pool/join")
-async def pool_join(token: str | None = Body(None, embed=True)):
+async def pool_join(token: Optional[str] = Body(None, embed=True)):
     created = False
     async with pool_lock:
         if not token:
@@ -128,20 +130,196 @@ async def pool_join(token: str | None = Body(None, embed=True)):
     return {"ok": True, "token": token, "created": created, "count": count}
 
 @app.post("/pool/leave")
-async def pool_leave(token: str | None = Body(None, embed=True)):
+async def pool_leave(token: Optional[str] = Body(None, embed=True)):
     async with pool_lock:
         if token and token in pool_tokens:
             pool_tokens.remove(token)
     return {"ok": True}
 
 # ------------------------------------------------------------------------------
-# Lightweight in-proc H2H matcher
-#   - waiting_players: token -> {"ws": WebSocket, "paired": Event, "done": Event}
-#   - We only pair when *both* sides opened /ws/match with a token.
-#   - If no one is waiting, we fall back to AI opponent immediately.
+# Matchmaking with env-controlled window + probability
 # ------------------------------------------------------------------------------
-waiting_players: Dict[str, dict] = {}
-waiting_lock = asyncio.Lock()
+class PendingReq:
+    __slots__ = ("ticket", "token", "created_at", "expires_at", "status", "reserved_ai",
+                 "pair_id", "opponent_type", "commit_hash", "commit_nonce", "commit_ts")
+    def __init__(self, ticket: str, token: str | None, now: float):
+        self.ticket = ticket
+        self.token = token
+        self.created_at = now
+        self.expires_at = now + MATCH_WINDOW_SECS
+        self.status: str = "pending"         # pending | ready_ai | ready_h2h | canceled
+        self.reserved_ai: bool = False
+        self.pair_id: Optional[str] = None
+        # commit–reveal (filled when resolved)
+        self.opponent_type: Optional[OpponentType] = None
+        self.commit_hash: Optional[str] = None
+        self.commit_nonce: Optional[str] = None
+        self.commit_ts: Optional[int] = None
+
+pending_requests: Dict[str, PendingReq] = {}
+pending_lock = asyncio.Lock()
+
+class PairSlot:
+    __slots__ = ("pair_id", "a_ticket", "b_ticket", "a_ws", "b_ws", "deadline")
+    def __init__(self, pair_id: str, a_ticket: str, b_ticket: str):
+        self.pair_id = pair_id
+        self.a_ticket = a_ticket
+        self.b_ticket = b_ticket
+        self.a_ws: Optional[WebSocket] = None
+        self.b_ws: Optional[WebSocket] = None
+        self.deadline = time.time() + 20.0  # if one never connects, time out
+
+pairs: Dict[str, PairSlot] = {}
+pairs_lock = asyncio.Lock()
+
+def commit_selection(opponent_type: OpponentType) -> tuple[str, str, int]:
+    nonce = secrets.token_hex(16)
+    ts_ms = int(time.time() * 1000)
+    h = hashlib.sha256(f"{opponent_type}|{nonce}|{ts_ms}".encode("utf-8")).hexdigest()
+    return h, nonce, ts_ms
+
+async def try_pair_with_oldest(cur_ticket: str):
+    """Look for the oldest pending (not reserved), coin flip with env H2H_PROB for H2H vs reserve AI."""
+    now = time.time()
+    candidate_ticket = None
+    oldest_t = 1e30
+    for t, req in pending_requests.items():
+        if t == cur_ticket:
+            continue
+        if req.status != "pending":
+            continue
+        if req.reserved_ai:
+            continue
+        if req.expires_at <= now:
+            continue
+        if req.created_at < oldest_t:
+            oldest_t = req.created_at
+            candidate_ticket = t
+
+    if not candidate_ticket:
+        return  # nobody overlapped
+
+    heads = (random.random() < H2H_PROB)  # True => H2H now
+    if heads:
+        # Pair H2H now
+        pair_id = secrets.token_hex(8)
+        a = pending_requests[candidate_ticket]
+        b = pending_requests[cur_ticket]
+        a.status = "ready_h2h"
+        b.status = "ready_h2h"
+        a.pair_id = pair_id
+        b.pair_id = pair_id
+        # selection commits
+        for req in (a, b):
+            h, n, ts = commit_selection("HUMAN")
+            req.opponent_type = "HUMAN"
+            req.commit_hash = h
+            req.commit_nonce = n
+            req.commit_ts = ts
+        async with pairs_lock:
+            pairs[pair_id] = PairSlot(pair_id, a_ticket=candidate_ticket, b_ticket=cur_ticket)
+    else:
+        # Reserve AI for exactly one of the two (uniformly)
+        chosen = pending_requests[cur_ticket] if random.random() < 0.5 else pending_requests[candidate_ticket]
+        chosen.reserved_ai = True  # chosen one flips to AI at expiry or immediate resolve
+
+@app.post("/match/request")
+async def match_request(token: Optional[str] = Body(None, embed=True)):
+    now = time.time()
+    ticket = secrets.token_hex(10)
+    req = PendingReq(ticket=ticket, token=token, now=now)
+    async with pending_lock:
+        pending_requests[ticket] = req
+        await try_pair_with_oldest(ticket)
+    return {"ticket": ticket, "expires_at": req.expires_at}
+
+def _time_left(req: PendingReq) -> float:
+    return max(0.0, req.expires_at - time.time())
+
+@app.get("/match/status")
+async def match_status(ticket: str = Query(...)):
+    async with pending_lock:
+        req = pending_requests.get(ticket)
+        if not req:
+            return {"status": "gone"}
+
+        if req.status == "ready_h2h":
+            return {
+                "status": "ready_h2h",
+                "ws_url": f"/ws/pair?pair_id={req.pair_id}&ticket={req.ticket}",
+                "commit_hash": req.commit_hash,
+                "time_left": _time_left(req),
+            }
+        if req.status == "ready_ai":
+            return {
+                "status": "ready_ai",
+                "ws_url": f"/ws/match?ticket={req.ticket}",
+                "commit_hash": req.commit_hash,
+                "time_left": _time_left(req),
+            }
+        if req.status == "canceled":
+            return {"status": "canceled"}
+
+        tl = _time_left(req)
+        if tl > 0:
+            return {"status": "pending", "time_left": tl}
+
+        # expired → resolve
+        if req.reserved_ai:
+            req.status = "ready_ai"
+            h, n, ts = commit_selection("AI")
+            req.opponent_type = "AI"
+            req.commit_hash = h
+            req.commit_nonce = n
+            req.commit_ts = ts
+            return {
+                "status": "ready_ai",
+                "ws_url": f"/ws/match?ticket={req.ticket}",
+                "commit_hash": req.commit_hash,
+                "time_left": 0.0,
+            }
+
+        # nobody paired and not reserved → AI by default at expiry
+        req.status = "ready_ai"
+        h, n, ts = commit_selection("AI")
+        req.opponent_type = "AI"
+        req.commit_hash = h
+        req.commit_nonce = n
+        req.commit_ts = ts
+        return {
+            "status": "ready_ai",
+            "ws_url": f"/ws/match?ticket={req.ticket}",
+            "commit_hash": req.commit_hash,
+            "time_left": 0.0,
+        }
+
+@app.post("/match/cancel")
+async def match_cancel(ticket: str = Body(..., embed=True)):
+    async with pending_lock:
+        req = pending_requests.get(ticket)
+        if not req:
+            return {"ok": True}
+        if req.status == "pending":
+            req.status = "canceled"
+        elif req.status == "ready_h2h":
+            # if paired, convert the other to AI immediately
+            pid = req.pair_id
+            if pid and pid in pairs:
+                pair = pairs[pid]
+                other_ticket = pair.b_ticket if pair.a_ticket == ticket else pair.a_ticket
+                other = pending_requests.get(other_ticket)
+                if other and other.status == "ready_h2h":
+                    other.status = "ready_ai"
+                    other.pair_id = None
+                    h, n, ts = commit_selection("AI")
+                    other.opponent_type = "AI"
+                    other.commit_hash = h
+                    other.commit_nonce = n
+                    other.commit_ts = ts
+                async with pairs_lock:
+                    pairs.pop(pid, None)
+            req.status = "canceled"
+    return {"ok": True}
 
 # ------------------------------------------------------------------------------
 # Utilities: commit–reveal, local bot, humanization, personas
@@ -237,8 +415,6 @@ def humanize_reply(text: str, max_words: int = LLM_MAX_WORDS, persona: Optional[
         s = s[:120].rstrip()
     typo_rate = (persona.get("typo_rate", HUMANIZE_TYPO_RATE) if persona else HUMANIZE_TYPO_RATE)
     s = _humanize_typos(s, rate=float(typo_rate), max_typos=HUMANIZE_MAX_TYPOS)
-
-    # very sparse extras
     if persona:
         emoji_pool = persona.get("emoji_pool", [])
         emoji_rate = float(persona.get("emoji_rate", 0.0))
@@ -286,13 +462,7 @@ def generate_persona(seed: str | None = None) -> dict:
     laughter_opts = ["lol","haha","","",""]
 
     gender = rng.choice(genders)
-    if gender == "female":
-        name = rng.choice(female_names)
-    elif gender == "male":
-        name = rng.choice(male_names)
-    else:
-        name = rng.choice(nb_names)
-
+    name = rng.choice(female_names if gender == "female" else male_names if gender == "male" else nb_names)
     age = rng.randint(20, 39)
     city = rng.choice(cities)
     hometown = rng.choice(hometowns)
@@ -469,10 +639,35 @@ async def ai_reply(history: list[str], persona: dict) -> str:
         return humanize_reply(simple_local_bot(history), max_words=LLM_MAX_WORDS, persona=persona)
 
 # ------------------------------------------------------------------------------
-# Game state
+# Safe WebSocket send
+# ------------------------------------------------------------------------------
+async def ws_send(ws: WebSocket, kind: str, **payload) -> bool:
+    """Send safely; return False if socket already closed or send fails."""
+    try:
+        state = getattr(ws, "application_state", None)
+        if state not in (None, WebSocketState.CONNECTED):
+            return False
+        await ws.send_text(json.dumps({"type": kind, **payload}))
+        return True
+    except (WebSocketDisconnect, RuntimeError):
+        return False
+    except Exception:
+        return False
+
+def _ws_alive(ws: Optional[WebSocket]) -> bool:
+    return bool(ws and getattr(ws, "application_state", None) == WebSocketState.CONNECTED)
+
+# ------------------------------------------------------------------------------
+# Game state container
 # ------------------------------------------------------------------------------
 class GameState:
-    def __init__(self, ws_a: WebSocket, ws_b: Optional[WebSocket], opponent_type: OpponentType):
+    def __init__(
+        self,
+        ws_a: WebSocket,
+        ws_b: Optional[WebSocket],
+        opponent_type: OpponentType,
+        preset_commit: Optional[dict[str, Any]] = None,
+    ):
         self.ws_a = ws_a
         self.ws_b = ws_b
         self.opponent_type = opponent_type
@@ -483,12 +678,23 @@ class GameState:
         self.history: list[str] = []
         self.score_a = 0
         self.score_b = 0
+        self.ended = False
+
+        # Persona per match
         self.nonce = secrets.token_hex(16)
         self.commit_ts = int(time.time() * 1000)
         self.commit_hash = commit_assignment(self.opponent_type, self.nonce, self.commit_ts)
         seed = f"{self.opponent_type}:{self.commit_hash}:{self.nonce}"
         self.persona = generate_persona(seed)
-        self.ended = False
+
+        # If preset commit is provided (from /match resolution), use it
+        if preset_commit:
+            self.opponent_type = preset_commit["opponent_type"]  # type: ignore
+            self.nonce = preset_commit["nonce"]                  # type: ignore
+            self.commit_ts = preset_commit["ts"]                 # type: ignore
+            self.commit_hash = preset_commit["hash"]             # type: ignore
+            seed = f"{self.opponent_type}:{self.commit_hash}:{self.nonce}"
+            self.persona = generate_persona(seed)
 
     def time_left_round(self) -> int:
         return max(0, self.round_deadline - int(time.time()))
@@ -508,217 +714,12 @@ class GameState:
     def reveal(self) -> dict:
         return {"opponent_type": self.opponent_type, "nonce": self.nonce, "commit_ts": self.commit_ts}
 
-async def ws_send(ws: WebSocket, kind: str, **payload):
-    await ws.send_text(json.dumps({"type": kind, **payload}))
-
 # ------------------------------------------------------------------------------
-# H2H runner: drives both sockets; both clients see themselves as "A"
+# AI runner (factored so we can reuse for fallback)
 # ------------------------------------------------------------------------------
-async def run_game_h2h(game: GameState):
-    # announce to both
-    for sock in (game.ws_a, game.ws_b):
-        await ws_send(
-            sock,
-            "match_start",
-            role="A",
-            commit_hash=game.commit_hash,
-            round_seconds=ROUND_LIMIT_SECS,
-            turn_seconds=TURN_LIMIT_SECS,
-            opponent="HUMAN",
-            persona=game.persona.get("name", ""),
-            version=APP_VERSION,
-        )
-    game.reset_turn_deadline()
+async def run_game_ai(ws: WebSocket, preset_commit: Optional[dict[str, Any]] = None):
+    game = GameState(ws_a=ws, ws_b=None, opponent_type="AI", preset_commit=preset_commit)
 
-    # Reader tasks (push incoming messages into a queue)
-    q: asyncio.Queue[tuple[str, dict]] = asyncio.Queue()
-
-    async def reader(tag: str, ws: WebSocket):
-        try:
-            while not game.ended:
-                raw = await ws.receive_text()
-                try:
-                    data = json.loads(raw)
-                except Exception:
-                    continue
-                await q.put((tag, data))
-        except WebSocketDisconnect:
-            # If someone disconnects, other wins by timeout
-            if not game.ended:
-                winner = "A" if tag == "B" else "B"
-                if winner == "A":
-                    game.score_a += SCORE_TIMEOUT_WIN
-                else:
-                    game.score_b += SCORE_TIMEOUT_WIN
-                for sock in (game.ws_a, game.ws_b):
-                    try:
-                        await ws_send(sock, "end", reason="disconnect", winner=winner,
-                                      score_delta=game.score_a if sock is game.ws_a else game.score_b,
-                                      reveal=game.reveal())
-                    except Exception:
-                        pass
-                game.ended = True
-
-    ta = asyncio.create_task(reader("A", game.ws_a))
-    tb = asyncio.create_task(reader("B", game.ws_b))
-
-    async def ticker():
-        try:
-            while not game.ended and game.time_left_round() > 0:
-                await asyncio.sleep(1)
-                payload = {"round_left": game.time_left_round(), "turn_left": game.time_left_turn(), "turn": game.turn}
-                for sock in (game.ws_a, game.ws_b):
-                    await ws_send(sock, "tick", **payload)
-                if game.time_left_turn() <= 0:
-                    winner = "B" if game.turn == "A" else "A"
-                    if winner == "A":
-                        game.score_a += SCORE_TIMEOUT_WIN
-                    else:
-                        game.score_b += SCORE_TIMEOUT_WIN
-                    for sock in (game.ws_a, game.ws_b):
-                        await ws_send(sock, "end", reason="timeout", winner=winner,
-                                      score_delta=game.score_a if sock is game.ws_a else game.score_b,
-                                      reveal=game.reveal())
-                    game.ended = True
-                    break
-        except Exception:
-            pass
-
-    tt = asyncio.create_task(ticker())
-
-    # Game loop: route messages by turn, handle guesses/states
-    try:
-        while not game.ended:
-            tag, data = await q.get()
-            mtype = data.get("type")
-
-            # chat
-            if mtype == "chat":
-                if (tag == "A" and game.turn == "A") or (tag == "B" and game.turn == "B"):
-                    text = (data.get("text") or "").strip()[:280]
-                    if not text:
-                        continue
-                    game.history.append(f"{tag}: {text}")
-                    # forward to the other
-                    target = game.ws_b if tag == "A" else game.ws_a
-                    await ws_send(target, "chat", from_="B", text=text)  # other side sees it as B
-                    # local echo (optional)
-                    me = game.ws_a if tag == "A" else game.ws_b
-                    await ws_send(me, "chat", from_="A", text=text)
-                    game.swap_turn()
-
-            # guess
-            if mtype == "guess":
-                guess = (data.get("guess") or "").upper()
-                correct = (guess == "HUMAN")
-                delta = SCORE_CORRECT if correct else SCORE_WRONG
-                if tag == "A":
-                    game.score_a += delta
-                else:
-                    game.score_b += delta
-                # end game on guess
-                for sock in (game.ws_a, game.ws_b):
-                    await ws_send(
-                        sock, "end",
-                        reason="guess",
-                        correct=correct,
-                        score_delta=game.score_a if sock is game.ws_a else game.score_b,
-                        reveal=game.reveal(),
-                    )
-                game.ended = True
-                break
-
-            # state
-            if mtype == "state":
-                who = game.ws_a if tag == "A" else game.ws_b
-                await ws_send(
-                    who, "state",
-                    opponent="HUMAN",
-                    round_left=game.time_left_round(),
-                    turn_left=game.time_left_turn(),
-                    turn=game.turn,
-                )
-
-    finally:
-        if not tt.done():
-            tt.cancel()
-        if not ta.done():
-            ta.cancel()
-        if not tb.done():
-            tb.cancel()
-
-# ------------------------------------------------------------------------------
-# Simple (single client) matcher: try waiting human, else AI
-# ------------------------------------------------------------------------------
-async def matchmake(ws: WebSocket, token: Optional[str]) -> GameState:
-    # Remove from visible pool on entering a match
-    async with pool_lock:
-        if token and token in pool_tokens:
-            pool_tokens.remove(token)
-
-    # Try to pair with an already waiting player
-    async with waiting_lock:
-        # pick any partner != token
-        partner_token = None
-        for t in waiting_players.keys():
-            if not token or t != token:
-                partner_token = t
-                break
-
-        if partner_token:
-            partner = waiting_players.pop(partner_token)
-            ws_b = partner["ws"]
-            game = GameState(ws, ws_b, "HUMAN")
-            # wake the partner handler (it will just wait until game ends)
-            partner["paired"].set()
-            # Run the H2H game here and block until done
-            await run_game_h2h(game)
-            # signal done to partner
-            partner["done"].set()
-            # after run_game_h2h returns, this ws_match ends
-            # return a dummy (won't be used)
-            return GameState(ws, None, "HUMAN")
-
-        # Nobody waiting: register self as waiting and block until paired,
-        # BUT per requirement we should fall back to AI immediately if no one is ready.
-        # So we DO NOT wait here. Instead, we stash ourselves as waiting for a short time?
-        # MVP rule: no partner present RIGHT NOW -> play AI.
-        # (If you want to wait in the future, we can add an optional 'wait_for_human' mode.)
-        pass
-
-    # Fall back to AI opponent
-    return GameState(ws, None, "AI")
-
-# ------------------------------------------------------------------------------
-# WebSocket endpoint
-#   - If it finds a waiting human, it pairs H2H (both see themselves as "A").
-#   - Otherwise it runs the standard A vs AI round (same as before).
-# ------------------------------------------------------------------------------
-@app.websocket("/ws/match")
-async def ws_match(ws: WebSocket, token: Optional[str] = Query(None)):
-    await ws.accept()
-
-    # Fast path: if we *are* waiting already (from another accidental connect), drop old
-    try:
-        async with waiting_lock:
-            if token and token in waiting_players:
-                # close old waiting socket
-                try:
-                    await waiting_players[token]["ws"].close()
-                except Exception:
-                    pass
-                waiting_players.pop(token, None)
-    except Exception:
-        pass
-
-    # Try H2H pairing immediately (or go AI)
-    game = await matchmake(ws, token)
-
-    # If we just completed H2H (run_game_h2h blocks), simply return
-    if game.opponent_type == "HUMAN" and game.ws_b is None:
-        return
-
-    # Otherwise, we are AI path — run the solo game loop as before
     await ws_send(
         ws,
         "match_start",
@@ -726,11 +727,10 @@ async def ws_match(ws: WebSocket, token: Optional[str] = Query(None)):
         commit_hash=game.commit_hash,
         round_seconds=ROUND_LIMIT_SECS,
         turn_seconds=TURN_LIMIT_SECS,
-        opponent=game.opponent_type,
+        opponent="AI",
         persona=game.persona.get("name", ""),
         version=APP_VERSION,
     )
-
     game.reset_turn_deadline()
 
     async def ticker():
@@ -740,7 +740,6 @@ async def ws_match(ws: WebSocket, token: Optional[str] = Query(None)):
                 payload = {"round_left": game.time_left_round(), "turn_left": game.time_left_turn(), "turn": game.turn}
                 await ws_send(game.ws_a, "tick", **payload)
                 if game.time_left_turn() <= 0:
-                    # A timed out -> B (AI) wins -> A gets +100 if winner is A; here winner is B so no score
                     winner = "B" if game.turn == "A" else "A"
                     if winner == "A":
                         game.score_a += SCORE_TIMEOUT_WIN
@@ -774,7 +773,6 @@ async def ws_match(ws: WebSocket, token: Optional[str] = Query(None)):
                 game.history.append(f"A: {text}")
                 game.swap_turn()
 
-                # AI reply
                 if not game.ended:
                     await ws_send(game.ws_a, "typing", who="B", on=True)
                     pre = random.uniform(HUMANIZE_MIN_DELAY, HUMANIZE_MAX_DELAY)
@@ -795,7 +793,7 @@ async def ws_match(ws: WebSocket, token: Optional[str] = Query(None)):
 
             if mtype == "guess":
                 guess = (data.get("guess") or "").upper()
-                correct = (guess == game.opponent_type)
+                correct = (guess == "AI")
                 delta = SCORE_CORRECT if correct else SCORE_WRONG
                 game.score_a += delta
                 await ws_send(
@@ -810,7 +808,7 @@ async def ws_match(ws: WebSocket, token: Optional[str] = Query(None)):
             if mtype == "state":
                 await ws_send(
                     game.ws_a, "state",
-                    opponent=game.opponent_type,
+                    opponent="AI",
                     round_left=game.time_left_round(),
                     turn_left=game.time_left_turn(),
                     turn=game.turn,
@@ -823,28 +821,224 @@ async def ws_match(ws: WebSocket, token: Optional[str] = Query(None)):
             ticker_task.cancel()
 
 # ------------------------------------------------------------------------------
-# Optional: a “wait for human” mode (not used by the UI), registering as waiting
-# If you later want a “Wait for human” button that never falls back to AI,
-# you can use this helper to park a socket until someone pairs it.
+# H2H runner: drives both sockets; both clients see themselves as "A"
 # ------------------------------------------------------------------------------
-@app.websocket("/ws/wait")
-async def ws_wait(ws: WebSocket, token: Optional[str] = Query(None)):
-    await ws.accept()
-    if not token:
-        token = secrets.token_hex(8)
+async def run_game_h2h(game: GameState):
+    # Initial kickoff sends (guarded)
+    ok_a = await ws_send(
+        game.ws_a,
+        "match_start",
+        role="A",
+        commit_hash=game.commit_hash,
+        round_seconds=ROUND_LIMIT_SECS,
+        turn_seconds=TURN_LIMIT_SECS,
+        opponent="HUMAN",
+        persona=game.persona.get("name", ""),
+        version=APP_VERSION,
+    )
+    ok_b = await ws_send(
+        game.ws_b,
+        "match_start",
+        role="A",
+        commit_hash=game.commit_hash,
+        round_seconds=ROUND_LIMIT_SECS,
+        turn_seconds=TURN_LIMIT_SECS,
+        opponent="HUMAN",
+        persona=game.persona.get("name", ""),
+        version=APP_VERSION,
+    )
 
-    paired = asyncio.Event()
-    done = asyncio.Event()
+    # If one side already dropped, fallback the alive one to AI to avoid instant end.
+    if not ok_a or not ok_b:
+        alive_ws = game.ws_a if ok_a else (game.ws_b if ok_b else None)
+        if alive_ws:
+            h, n, ts = commit_selection("AI")
+            preset = {"opponent_type": "AI", "hash": h, "nonce": n, "ts": ts}
+            await run_game_ai(alive_ws, preset_commit=preset)
+        game.ended = True
+        return
 
-    async with waiting_lock:
-        waiting_players[token] = {"ws": ws, "paired": paired, "done": done}
+    game.reset_turn_deadline()
+
+    q: asyncio.Queue[tuple[str, dict]] = asyncio.Queue()
+
+    async def reader(tag: str, ws: WebSocket):
+        try:
+            while not game.ended:
+                raw = await ws.receive_text()
+                try:
+                    data = json.loads(raw)
+                except Exception:
+                    continue
+                await q.put((tag, data))
+        except WebSocketDisconnect:
+            if not game.ended:
+                winner = "A" if tag == "B" else "B"
+                if winner == "A":
+                    game.score_a += SCORE_TIMEOUT_WIN
+                else:
+                    game.score_b += SCORE_TIMEOUT_WIN
+                await ws_send(game.ws_a, "end", reason="disconnect", winner=winner,
+                              score_delta=game.score_a, reveal=game.reveal())
+                await ws_send(game.ws_b, "end", reason="disconnect", winner=winner,
+                              score_delta=game.score_b, reveal=game.reveal())
+                game.ended = True
+
+    ta = asyncio.create_task(reader("A", game.ws_a))
+    tb = asyncio.create_task(reader("B", game.ws_b))
+
+    async def ticker():
+        try:
+            while not game.ended and game.time_left_round() > 0:
+                await asyncio.sleep(1)
+                payload = {"round_left": game.time_left_round(), "turn_left": game.time_left_turn(), "turn": game.turn}
+                await ws_send(game.ws_a, "tick", **payload)
+                await ws_send(game.ws_b, "tick", **payload)
+                if game.time_left_turn() <= 0:
+                    winner = "B" if game.turn == "A" else "A"
+                    if winner == "A":
+                        game.score_a += SCORE_TIMEOUT_WIN
+                    else:
+                        game.score_b += SCORE_TIMEOUT_WIN
+                    await ws_send(game.ws_a, "end", reason="timeout", winner=winner,
+                                  score_delta=game.score_a, reveal=game.reveal())
+                    await ws_send(game.ws_b, "end", reason="timeout", winner=winner,
+                                  score_delta=game.score_b, reveal=game.reveal())
+                    game.ended = True
+                    break
+        except Exception:
+            pass
+
+    tt = asyncio.create_task(ticker())
 
     try:
-        # block until paired, then until done
-        await paired.wait()
-        await done.wait()
-    except WebSocketDisconnect:
-        pass
+        while not game.ended:
+            tag, data = await q.get()
+            mtype = data.get("type")
+
+            if mtype == "chat":
+                if (tag == "A" and game.turn == "A") or (tag == "B" and game.turn == "B"):
+                    text = (data.get("text") or "").strip()[:280]
+                    if not text:
+                        continue
+                    game.history.append(f"{tag}: {text}")
+                    other = game.ws_b if tag == "A" else game.ws_a
+                    me = game.ws_a if tag == "A" else game.ws_b
+                    await ws_send(other, "chat", from_="B", text=text)
+                    await ws_send(me, "chat", from_="A", text=text)
+                    game.swap_turn()
+
+            if mtype == "guess":
+                guess = (data.get("guess") or "").upper()
+                correct = (guess == "HUMAN")
+                delta = SCORE_CORRECT if correct else SCORE_WRONG
+                if tag == "A":
+                    game.score_a += delta
+                else:
+                    game.score_b += delta
+                await ws_send(game.ws_a, "end", reason="guess", correct=correct,
+                              score_delta=game.score_a, reveal=game.reveal())
+                await ws_send(game.ws_b, "end", reason="guess", correct=correct,
+                              score_delta=game.score_b, reveal=game.reveal())
+                game.ended = True
+                break
+
+            if mtype == "state":
+                who = game.ws_a if tag == "A" else game.ws_b
+                await ws_send(
+                    who, "state",
+                    opponent="HUMAN",
+                    round_left=game.time_left_round(),
+                    turn_left=game.time_left_turn(),
+                    turn=game.turn,
+                )
+
     finally:
-        async with waiting_lock:
-            waiting_players.pop(token, None)
+        if not tt.done():
+            tt.cancel()
+        if not ta.done():
+            ta.cancel()
+        if not tb.done():
+            tb.cancel()
+
+# ------------------------------------------------------------------------------
+# AI path: /ws/match?ticket=...
+# ------------------------------------------------------------------------------
+@app.websocket("/ws/match")
+async def ws_match(ws: WebSocket, ticket: Optional[str] = Query(None)):
+    await ws.accept()
+
+    # Find the resolved ticket (ready_ai) and build preset commit
+    preset = None
+    tok = None
+    if ticket:
+        async with pending_lock:
+            req = pending_requests.get(ticket)
+            if req and req.status == "ready_ai":
+                preset = {"opponent_type": "AI", "hash": req.commit_hash, "nonce": req.commit_nonce, "ts": req.commit_ts}
+                tok = req.token
+
+    # remove from visible pool on match start
+    if tok:
+        async with pool_lock:
+            pool_tokens.discard(tok)
+
+    await run_game_ai(ws, preset_commit=preset)
+
+# ------------------------------------------------------------------------------
+# H2H pair socket: /ws/pair?pair_id=...&ticket=...
+# ------------------------------------------------------------------------------
+@app.websocket("/ws/pair")
+async def ws_pair(ws: WebSocket, pair_id: str = Query(...), ticket: str = Query(...)):
+    await ws.accept()
+    # Attach to pair; when both present, run H2H and clear
+    async with pairs_lock:
+        pair = pairs.get(pair_id)
+        if not pair or (pair.a_ticket != ticket and pair.b_ticket != ticket):
+            await ws.close()
+            return
+        if pair.a_ticket == ticket:
+            pair.a_ws = ws
+        else:
+            pair.b_ws = ws
+
+        ready = pair.a_ws is not None and pair.b_ws is not None
+
+    # Clean pool visibility for both tickets
+    async with pending_lock:
+        a_req = pending_requests.get(pair.a_ticket) if pair else None
+        b_req = pending_requests.get(pair.b_ticket) if pair else None
+    async with pool_lock:
+        for req in (a_req, b_req):
+            if req and req.token:
+                pool_tokens.discard(req.token)
+
+    if ready:
+        # Preflight: make sure both sockets are still alive
+        if not (_ws_alive(pair.a_ws) and _ws_alive(pair.b_ws)):
+            # Fallback the alive one to AI match
+            alive_ws = pair.a_ws if _ws_alive(pair.a_ws) else (pair.b_ws if _ws_alive(pair.b_ws) else None)
+            if alive_ws:
+                h, n, ts = commit_selection("AI")
+                preset = {"opponent_type": "AI", "hash": h, "nonce": n, "ts": ts}
+                await run_game_ai(alive_ws, preset_commit=preset)
+            async with pairs_lock:
+                pairs.pop(pair_id, None)
+            return
+
+        # Build preset commit from either req (both HUMAN)
+        async with pending_lock:
+            a_req2 = pending_requests.get(pair.a_ticket)
+            if a_req2 and a_req2.commit_hash:
+                preset = {"opponent_type": "HUMAN", "hash": a_req2.commit_hash, "nonce": a_req2.commit_nonce, "ts": a_req2.commit_ts}
+            else:
+                # fallback (shouldn't happen): create a fresh HUMAN commit
+                h, n, ts = commit_selection("HUMAN")
+                preset = {"opponent_type": "HUMAN", "hash": h, "nonce": n, "ts": ts}
+
+        game = GameState(ws_a=pair.a_ws, ws_b=pair.b_ws, opponent_type="HUMAN", preset_commit=preset)
+        await run_game_h2h(game)
+
+        # cleanup
+        async with pairs_lock:
+            pairs.pop(pair_id, None)
