@@ -1,0 +1,15 @@
+-r requirements.txt
+
+# Testing
+pytest==7.4.3
+pytest-asyncio==0.21.1
+pytest-cov==4.1.0
+httpx==0.25.2
+
+# Linting & Formatting
+black==23.12.1
+ruff==0.1.9
+mypy==1.8.0
+
+# Type stubs
+types-redis==4.6.0.11
