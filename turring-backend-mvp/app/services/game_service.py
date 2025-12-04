@@ -42,14 +42,15 @@ HUMANIZE_MAX_DELAY = float(os.getenv("HUMANIZE_MAX_DELAY", "1.6"))
 APP_VERSION = os.getenv("APP_VERSION", "2")
 
 
-async def run_game_ai(ws: WebSocket, preset_commit: Optional[dict[str, Any]] = None):
+async def run_game_ai(ws: WebSocket, preset_commit: Optional[dict[str, Any]] = None, lang_pref: str = "en"):
     """Run an AI vs Human game session.
 
     Args:
         ws: WebSocket connection for player A
         preset_commit: Optional preset commit-reveal data for fairness verification
+        lang_pref: Language preference for AI ("en" or "de")
     """
-    game = GameState(ws_a=ws, ws_b=None, opponent_type="AI", preset_commit=preset_commit)
+    game = GameState(ws_a=ws, ws_b=None, opponent_type="AI", preset_commit=preset_commit, lang_pref=lang_pref)
 
     # Create conversation log session
     import uuid

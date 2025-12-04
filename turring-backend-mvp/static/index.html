@@ -598,6 +598,60 @@
       color: var(--primary);
     }
 
+    /* Language Selector */
+    .language-selector {
+      padding: 12px;
+      background: var(--light-gray);
+      border-radius: 8px;
+      margin-bottom: 12px;
+    }
+
+    .language-label {
+      font-size: 0.85rem;
+      color: var(--gray);
+      font-weight: 600;
+      margin-bottom: 8px;
+    }
+
+    .language-options {
+      display: flex;
+      gap: 8px;
+    }
+
+    .language-option {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 8px 12px;
+      background: white;
+      border: 2px solid var(--border);
+      border-radius: 8px;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      font-size: 0.9rem;
+      font-weight: 500;
+    }
+
+    .language-option:hover {
+      border-color: var(--primary-light);
+      background: #f8f9ff;
+    }
+
+    .language-option input[type="radio"] {
+      display: none;
+    }
+
+    .language-option input[type="radio"]:checked + span {
+      color: var(--primary);
+      font-weight: 600;
+    }
+
+    .language-option:has(input[type="radio"]:checked) {
+      border-color: var(--primary);
+      background: #f0f2ff;
+    }
+
     /* Commit Hash */
     .commit-display {
       font-size: 0.7rem;
@@ -608,6 +662,53 @@
       border-radius: 6px;
       word-break: break-all;
       margin-top: 12px;
+    }
+
+    /* Tutorial System */
+    .tutorial-pointer {
+      position: absolute;
+      z-index: 10000;
+      pointer-events: none;
+      animation: bounce 1s ease-in-out infinite;
+    }
+
+    .tutorial-arrow {
+      width: 0;
+      height: 0;
+      border-left: 20px solid transparent;
+      border-right: 20px solid transparent;
+      border-top: 30px solid var(--warning);
+      filter: drop-shadow(0 2px 4px rgba(0,0,0,0.3));
+    }
+
+    .tutorial-text {
+      position: absolute;
+      top: -50px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: var(--warning);
+      color: white;
+      padding: 8px 16px;
+      border-radius: 8px;
+      font-weight: 600;
+      font-size: 0.9rem;
+      white-space: nowrap;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+    }
+
+    .tutorial-highlight {
+      position: relative;
+      animation: pulse 2s ease-in-out infinite;
+    }
+
+    @keyframes bounce {
+      0%, 100% { transform: translateY(0); }
+      50% { transform: translateY(-10px); }
+    }
+
+    @keyframes pulse {
+      0%, 100% { box-shadow: 0 0 0 0 rgba(243, 158, 11, 0.7); }
+      50% { box-shadow: 0 0 0 10px rgba(243, 158, 11, 0); }
     }
   </style>
 </head>
@@ -681,6 +782,21 @@
           <div class="pool-info">
             <span class="pool-label">Players in Pool</span>
             <span class="pool-count" id="poolCount">0</span>
+          </div>
+
+          <!-- Language Selection -->
+          <div class="language-selector">
+            <div class="language-label">AI Language</div>
+            <div class="language-options">
+              <label class="language-option">
+                <input type="radio" name="language" value="en" checked />
+                <span>🇬🇧 English</span>
+              </label>
+              <label class="language-option">
+                <input type="radio" name="language" value="de" />
+                <span>🇩🇪 Deutsch</span>
+              </label>
+            </div>
           </div>
 
           <div class="action-buttons">
@@ -797,6 +913,77 @@ const playAgainBtn = document.getElementById('playAgainBtn');
 updateTokenDisplay();
 updateSessionStats();
 startPoolPolling();
+
+// Tutorial System
+let tutorialStep = localStorage.getItem('tutorial_step') || 'join_pool';
+let tutorialPointer = null;
+
+function showTutorial(target, text) {
+  // Remove existing pointer
+  if (tutorialPointer) {
+    tutorialPointer.remove();
+  }
+
+  const targetEl = document.getElementById(target);
+  if (!targetEl) return;
+
+  // Add highlight to button
+  targetEl.classList.add('tutorial-highlight');
+
+  // Create pointer
+  tutorialPointer = document.createElement('div');
+  tutorialPointer.className = 'tutorial-pointer';
+  tutorialPointer.innerHTML = `
+    <div class="tutorial-text">${text}</div>
+    <div class="tutorial-arrow"></div>
+  `;
+
+  // Position pointer above button
+  const rect = targetEl.getBoundingClientRect();
+  tutorialPointer.style.top = (rect.top - 50) + 'px';
+  tutorialPointer.style.left = (rect.left + rect.width / 2 - 20) + 'px';
+
+  document.body.appendChild(tutorialPointer);
+}
+
+function hideTutorial() {
+  // Remove all highlights
+  document.querySelectorAll('.tutorial-highlight').forEach(el => {
+    el.classList.remove('tutorial-highlight');
+  });
+
+  // Remove pointer
+  if (tutorialPointer) {
+    tutorialPointer.remove();
+    tutorialPointer = null;
+  }
+}
+
+function advanceTutorial(step) {
+  localStorage.setItem('tutorial_step', step);
+  tutorialStep = step;
+  hideTutorial();
+
+  // Show next step
+  setTimeout(() => {
+    if (step === 'join_pool') {
+      showTutorial('joinPoolBtn', 'Step 1: Join the Pool');
+    } else if (step === 'start_match') {
+      showTutorial('startBtn', 'Step 2: Start a Match');
+    } else if (step === 'chat') {
+      showTutorial('msgInput', 'Step 3: Chat Here!');
+    } else if (step === 'completed') {
+      hideTutorial();
+    }
+  }, 300);
+}
+
+// Initialize tutorial for new users
+if (tutorialStep === 'join_pool') {
+  setTimeout(() => {
+    showTutorial('joinPoolBtn', 'Step 1: Join the Pool');
+  }, 1000);
+}
 
 function updateTokenDisplay() {
   if (myToken) {
@@ -954,6 +1141,11 @@ joinPoolBtn.onclick = async () => {
       updateTokenDisplay();
       addSystemMessage('✓ Joined the pool');
       pollPool();
+
+      // Tutorial: advance to next step
+      if (tutorialStep === 'join_pool') {
+        advanceTutorial('start_match');
+      }
     } else {
       addSystemMessage('✗ Failed to join pool');
     }
@@ -996,11 +1188,19 @@ startBtn.onclick = async () => {
   setGameState('matchmaking');
   showOverlay();
 
+  // Tutorial: advance to next step
+  if (tutorialStep === 'start_match') {
+    advanceTutorial('chat');
+  }
+
   try {
+    // Get selected language
+    const selectedLang = document.querySelector('input[name="language"]:checked')?.value || 'en';
+
     const r = await fetch('/match/request', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({ token: myToken })
+      body: JSON.stringify({ token: myToken, lang: selectedLang })
     });
     const j = await r.json();
     pendingTicket = j.ticket;
@@ -1133,6 +1333,11 @@ sendBtn.onclick = () => {
   addMessage('You', v, true);
   msgInput.value = '';
   msgInput.focus();
+
+  // Tutorial: complete on first message sent
+  if (tutorialStep === 'chat') {
+    advanceTutorial('completed');
+  }
 };
 
 msgInput.addEventListener('keydown', (e) => {

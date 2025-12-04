@@ -17,7 +17,7 @@ def _seeded_rng(seed_str: str) -> random.Random:
     return random.Random(int(h[:16], 16))
 
 
-def generate_persona(seed: Optional[str] = None) -> dict:
+def generate_persona(seed: Optional[str] = None, lang_pref: str = "en") -> dict:
     """Generate a random persona with demographics, style, and communication traits.
 
     Args:
@@ -41,7 +41,10 @@ def generate_persona(seed: Optional[str] = None) -> dict:
     # Work and lifestyle
     jobs = [
         "UX researcher", "barista", "front-end dev", "product manager", "physio", "photographer", "nurse",
-        "data analyst", "teacher", "marketing lead", "warehouse operator", "student", "copywriter", "data engineer"
+        "data analyst", "teacher", "marketing lead", "warehouse operator", "student", "copywriter", "data engineer",
+        "graphic designer", "social media manager", "HR coordinator", "architect", "chef", "mechanic", "pharmacist",
+        "accountant", "video editor", "translator", "recruiter", "sales rep", "DevOps engineer", "legal assistant",
+        "personal trainer", "event planner", "journalist", "librarian", "dental hygienist", "real estate agent"
     ]
     industries = ["tech", "healthcare", "education", "logistics", "finance", "retail", "media", "public sector", "hospitality"]
 
@@ -49,13 +52,20 @@ def generate_persona(seed: Optional[str] = None) -> dict:
     hobbies = [
         "bouldering", "running 5k", "cycling", "yoga", "reading thrillers", "console gaming", "football on Sundays",
         "cooking ramen", "photography", "cinema nights", "coffee nerd stuff", "hiking", "board games", "baking",
-        "thrifting", "vinyl digging", "tennis", "swimming"
+        "thrifting", "vinyl digging", "tennis", "swimming", "gardening", "sketching", "guitar practice",
+        "podcasts", "chess online", "standup comedy", "language learning", "crossfit", "DJing", "coding side projects",
+        "pottery classes", "rock climbing", "meal prep", "urban exploring", "film photography", "indie concerts",
+        "trivia nights", "volunteering", "skateboarding", "boxing", "journaling", "fermenting", "origami",
+        "mixology", "calligraphy", "astronomy"
     ]
 
     # Communication style
     texting_styles = [
         "dry humor, concise", "warm tone, lowercase start", "short replies, occasional emoji",
-        "light sarcasm, contractions", "enthusiastic, a bit bubbly", "matter-of-fact, chill"
+        "light sarcasm, contractions", "enthusiastic, a bit bubbly", "matter-of-fact, chill",
+        "thoughtful pauses", "playful teasing", "genuine curiosity", "understated wit",
+        "casual philosophizing", "deadpan delivery", "expressive punctuation", "minimalist responses",
+        "overthinking everything", "relaxed storyteller", "self-deprecating humor", "enthusiastic oversharer"
     ]
     slang_sets = [["lol", "haha"], ["digga"], ["bro"], ["mate"], ["bruh"], []]
     dialects = ["Standarddeutsch", "leichter Berliner Slang", "Kölsch-Note", "Hochdeutsch", "Denglisch", "English-first, understands German"]
@@ -77,21 +87,37 @@ def generate_persona(seed: Optional[str] = None) -> dict:
     schedule = rng.choice(["early riser", "standard 9–5", "night owl"])
     micro_today = rng.choice([
         "spilled coffee earlier", "bike tire was flat", "friend's birthday later",
-        "rushed morning standup", "gym after work", "meal prepping tonight", "laundry mountain waiting"
+        "rushed morning standup", "gym after work", "meal prepping tonight", "laundry mountain waiting",
+        "dentist appointment later", "package arriving today", "car needs inspection soon",
+        "meeting ran overtime", "forgot lunch at home", "train was delayed", "found 5€ on street",
+        "neighbor's dog was loud", "wifi went down earlier", "new episode dropped", "plants needed watering",
+        "trying new recipe tonight", "sister called earlier", "lost earbuds somewhere", "ordered pizza for dinner",
+        "finished book yesterday", "apartment viewing tomorrow", "team won last night", "haircut this weekend",
+        "deadline approaching", "roommate left dishes", "forgot umbrella again", "keys were missing",
+        "elevator broken today", "got text from ex", "need groceries badly", "ran into old friend",
+        "phone battery dying", "coffee machine broke", "printer jammed again", "cat knocked over plant"
     ])
 
-    music = rng.choice(["indie", "electro", "hip hop", "pop", "rock", "lofi", "jazz"])
-    food = rng.choice(["ramen", "pasta", "tacos", "salads", "curry", "falafel", "pizza", "kumpir"])
-    pet = rng.choice(["cat", "dog", "no pets", "plants count"])
+    music = rng.choice(["indie", "electro", "hip hop", "pop", "rock", "lofi", "jazz", "techno", "folk", "r&b", "metal", "classical", "punk"])
+    food = rng.choice(["ramen", "pasta", "tacos", "salads", "curry", "falafel", "pizza", "kumpir", "sushi", "dim sum", "pho", "burgers", "dumplings", "shawarma"])
+    pet = rng.choice(["cat", "dog", "no pets", "plants count", "fish tank", "bird", "thinking about getting one"])
     soft_opinion = rng.choice([
         "pineapple on pizza is fine", "meetings should be emails", "night buses are underrated",
-        "sunny cold days > rainy warm ones", "decaf is a scam", "paper books > ebooks sometimes"
+        "sunny cold days > rainy warm ones", "decaf is a scam", "paper books > ebooks sometimes",
+        "breakfast is overrated", "standing desks changed everything", "cold brew > espresso",
+        "subtitle movies are better", "winter > summer", "cereal is a soup", "hot dogs are sandwiches",
+        "GIFs are the best replies", "voice messages are annoying", "typing is faster than talking",
+        "morning people are suspicious", "podcasts at 1.5x speed", "tabs > spaces", "light mode hurts",
+        "cilantro tastes like soap", "mint chocolate is weird", "ketchup on fries is basic",
+        "pumpkin spice is good", "comic sans isn't that bad", "NFTs make no sense",
+        "dogs > cats obviously", "cats > dogs obviously", "remote work forever", "office has its perks"
     ])
 
     style = rng.choice(texting_styles)
     slang = rng.choice(slang_sets)
     dialect = rng.choice(dialects)
-    lang_pref = rng.choice(langs)
+    # Use specified language preference instead of random
+    # lang_pref passed as parameter (defaults to "en")
     emoji_pool = rng.choice(emoji_bundles)
     emoji_rate = 0.03 if emoji_pool else 0.0
     laughter = rng.choice(laughter_opts)

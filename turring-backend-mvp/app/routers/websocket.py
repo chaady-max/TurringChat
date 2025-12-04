@@ -31,11 +31,13 @@ async def ws_match(ws: WebSocket, ticket: Optional[str] = Query(None)):
     # Find the resolved ticket (ready_ai) and build preset commit
     preset = None
     tok = None
+    lang_pref = "en"
     if ticket:
         async with pending_lock:
             req = pending_requests.get(ticket)
             if req and req.status == "ready_ai":
-                preset = {"opponent_type": "AI", "hash": req.commit_hash, "nonce": req.commit_nonce, "ts": req.commit_ts}
+                preset = {"opponent_type": "AI", "hash": req.commit_hash, "nonce": req.commit_nonce, "ts": req.commit_ts, "lang": req.lang_pref}
+                lang_pref = req.lang_pref
                 tok = req.token
 
     # remove from visible pool on match start
@@ -43,7 +45,7 @@ async def ws_match(ws: WebSocket, ticket: Optional[str] = Query(None)):
         async with pool_lock:
             pool_tokens.discard(tok)
 
-    await run_game_ai(ws, preset_commit=preset)
+    await run_game_ai(ws, preset_commit=preset, lang_pref=lang_pref)
 
 
 @router.websocket("/ws/pair")
@@ -82,9 +84,16 @@ async def ws_pair(ws: WebSocket, pair_id: str = Query(...), ticket: str = Query(
             # Fallback the alive one to AI match
             alive_ws = pair.a_ws if ws_alive(pair.a_ws) else (pair.b_ws if ws_alive(pair.b_ws) else None)
             if alive_ws:
+                # Get lang_pref from whichever player is alive
+                alive_ticket = pair.a_ticket if ws_alive(pair.a_ws) else pair.b_ticket
+                alive_lang = "en"
+                async with pending_lock:
+                    alive_req = pending_requests.get(alive_ticket)
+                    if alive_req:
+                        alive_lang = alive_req.lang_pref
                 h, n, ts = commit_selection("AI")
-                preset = {"opponent_type": "AI", "hash": h, "nonce": n, "ts": ts}
-                await run_game_ai(alive_ws, preset_commit=preset)
+                preset = {"opponent_type": "AI", "hash": h, "nonce": n, "ts": ts, "lang": alive_lang}
+                await run_game_ai(alive_ws, preset_commit=preset, lang_pref=alive_lang)
             async with pairs_lock:
                 pairs.pop(pair_id, None)
             return

@@ -17,15 +17,25 @@ router = APIRouter(prefix="/match", tags=["matchmaking"])
 
 
 @router.post("/request")
-async def match_request(token: Optional[str] = Body(None, embed=True)):
+async def match_request(
+    token: Optional[str] = Body(None, embed=True),
+    lang: Optional[str] = Body("en", embed=True)
+):
     """Request a match from the matchmaking system.
 
     Creates a pending request and attempts to pair with another waiting player.
     Returns a ticket that can be used to poll for match status.
+
+    Args:
+        token: Optional pool token for prioritized matching
+        lang: Language preference for AI ("en" or "de"), defaults to "en"
     """
+    # Validate language
+    lang_pref = "en" if lang not in ["en", "de"] else lang
+
     now = time.time()
     ticket = secrets.token_hex(10)
-    req = PendingReq(ticket=ticket, token=token, now=now)
+    req = PendingReq(ticket=ticket, token=token, now=now, lang_pref=lang_pref)
     async with pending_lock:
         pending_requests[ticket] = req
         await try_pair_with_oldest(ticket)

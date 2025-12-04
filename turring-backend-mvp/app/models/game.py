@@ -27,9 +27,9 @@ class PendingReq:
     """Represents a pending match request."""
 
     __slots__ = ("ticket", "token", "created_at", "expires_at", "status", "reserved_ai",
-                 "pair_id", "opponent_type", "commit_hash", "commit_nonce", "commit_ts")
+                 "pair_id", "opponent_type", "commit_hash", "commit_nonce", "commit_ts", "lang_pref")
 
-    def __init__(self, ticket: str, token: Optional[str], now: float):
+    def __init__(self, ticket: str, token: Optional[str], now: float, lang_pref: str = "en"):
         from app.config import settings
 
         self.ticket = ticket
@@ -44,6 +44,7 @@ class PendingReq:
         self.commit_hash: Optional[str] = None
         self.commit_nonce: Optional[str] = None
         self.commit_ts: Optional[int] = None
+        self.lang_pref: str = lang_pref  # "en" or "de"
 
 
 class PairSlot:
@@ -70,6 +71,7 @@ class GameState:
         opponent_type: OpponentType,
         preset_commit: Optional[dict[str, Any]] = None,
         generate_persona_func: Optional[Any] = None,
+        lang_pref: str = "en",
     ):
         from app.config import settings
 
@@ -98,7 +100,7 @@ class GameState:
         if generate_persona_func is None:
             from app.services.persona_service import generate_persona
             generate_persona_func = generate_persona
-        self.persona = generate_persona_func(seed)
+        self.persona = generate_persona_func(seed, lang_pref=lang_pref)
 
         # If preset commit is provided (from /match resolution), use it
         if preset_commit:
@@ -106,8 +108,9 @@ class GameState:
             self.nonce = preset_commit["nonce"]                  # type: ignore
             self.commit_ts = preset_commit["ts"]                 # type: ignore
             self.commit_hash = preset_commit["hash"]             # type: ignore
+            lang_pref = preset_commit.get("lang", lang_pref)     # type: ignore
             seed = f"{self.opponent_type}:{self.commit_hash}:{self.nonce}"
-            self.persona = generate_persona_func(seed)
+            self.persona = generate_persona_func(seed, lang_pref=lang_pref)
 
     def time_left_round(self) -> int:
         """Calculate seconds remaining in the round."""
