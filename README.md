@@ -245,12 +245,12 @@ pip install -r requirements.txt
 ## 🛣️ Roadmap
 
 - [x] ✅ Modular utilities and configuration
-- [ ] Extract routers, services, models into separate files
+- [x] ✅ Extract routers, services, models into separate files
 - [ ] Comprehensive test suite (>80% coverage)
 - [ ] Frontend modernization (React/Vue)
 - [ ] Redis-backed state for multi-instance deployment
 - [ ] Prometheus metrics and observability
-- [ ] Admin dashboard for monitoring games
+- [x] ✅ Admin dashboard for monitoring games
 - [ ] Machine learning for improved AI detection resistance
 
 ## 📝 License
