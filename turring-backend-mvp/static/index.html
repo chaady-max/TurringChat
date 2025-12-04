@@ -3,72 +3,717 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Turring Test — Dev Client</title>
+  <title>TurringChat - Can You Spot the AI?</title>
   <style>
-    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 20px; }
-    #log { border: 1px solid #ddd; padding: 10px; height: 320px; overflow-y: auto; white-space: pre-wrap; background: #fafafa; }
-    .row { margin-top: 10px; display: flex; gap: 8px; flex-wrap: wrap; }
-    button { padding: 8px 12px; }
-    input[type="text"] { flex: 1; padding: 8px; }
-    .stats { margin-top: 10px; font-size: 14px; color: #444; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
-    .badge { display: inline-block; padding: 4px 8px; border: 1px solid #ccc; border-radius: 6px; background: #fff; }
-    .counter { font-weight: 600; }
-    .pill { padding: 4px 8px; border-radius: 999px; background: #eee; }
-    /* timer colors */
-    .timer-green  { background: #e6f6ea; border-color: #8ad1a3; color: #1f6b3a; }
-    .timer-orange { background: #fff1e0; border-color: #f3b46a; color: #8a4b00; }
-    .timer-red    { background: #ffe7e7; border-color: #f08f90; color: #8a1c1d; }
-    /* overlay */
-    #overlay {
-      position: fixed; inset: 0; background: rgba(0,0,0,0.45);
-      display: none; align-items: center; justify-content: center; z-index: 20;
+    :root {
+      --primary: #6366f1;
+      --primary-dark: #4f46e5;
+      --primary-light: #818cf8;
+      --success: #10b981;
+      --danger: #ef4444;
+      --warning: #f59e0b;
+      --dark: #1f2937;
+      --darker: #111827;
+      --gray: #6b7280;
+      --light-gray: #f3f4f6;
+      --border: #e5e7eb;
+      --shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+      --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
     }
-    #overlay .box {
-      background: #fff; padding: 16px 18px; border-radius: 10px; box-shadow: 0 8px 24px rgba(0,0,0,0.2);
-      min-width: 280px; text-align: center;
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      min-height: 100vh;
+      padding: 20px;
+      color: var(--dark);
     }
-    #overlay .big { font-size: 18px; font-weight: 600; margin-bottom: 6px; }
-    #overlay .sub { font-size: 14px; color: #555; }
+
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+    }
+
+    /* Header */
+    .header {
+      text-align: center;
+      color: white;
+      margin-bottom: 30px;
+      animation: fadeInDown 0.6s ease;
+    }
+
+    .header h1 {
+      font-size: 2.5rem;
+      font-weight: 800;
+      margin-bottom: 8px;
+      text-shadow: 0 2px 10px rgba(0,0,0,0.2);
+    }
+
+    .header .tagline {
+      font-size: 1.1rem;
+      opacity: 0.95;
+      font-weight: 500;
+    }
+
+    /* Stats Bar */
+    .stats-bar {
+      background: white;
+      border-radius: 16px;
+      padding: 20px;
+      margin-bottom: 20px;
+      box-shadow: var(--shadow-lg);
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 20px;
+      animation: fadeIn 0.6s ease 0.1s backwards;
+    }
+
+    .stat-card {
+      text-align: center;
+      padding: 12px;
+      border-radius: 12px;
+      background: var(--light-gray);
+      transition: transform 0.2s, box-shadow 0.2s;
+    }
+
+    .stat-card:hover {
+      transform: translateY(-2px);
+      box-shadow: var(--shadow);
+    }
+
+    .stat-label {
+      font-size: 0.85rem;
+      color: var(--gray);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      font-weight: 600;
+      margin-bottom: 6px;
+    }
+
+    .stat-value {
+      font-size: 1.8rem;
+      font-weight: 700;
+      color: var(--primary);
+    }
+
+    .stat-value.success { color: var(--success); }
+    .stat-value.danger { color: var(--danger); }
+    .stat-value.warning { color: var(--warning); }
+
+    /* Main Game Area */
+    .game-container {
+      display: grid;
+      grid-template-columns: 1fr 300px;
+      gap: 20px;
+      animation: fadeIn 0.6s ease 0.2s backwards;
+    }
+
+    @media (max-width: 968px) {
+      .game-container {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    /* Chat Area */
+    .chat-panel {
+      background: white;
+      border-radius: 16px;
+      box-shadow: var(--shadow-lg);
+      display: flex;
+      flex-direction: column;
+      height: 600px;
+      overflow: hidden;
+    }
+
+    .chat-header {
+      background: linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%);
+      color: white;
+      padding: 20px;
+      font-weight: 600;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .chat-status {
+      font-size: 0.9rem;
+      opacity: 0.9;
+    }
+
+    .chat-messages {
+      flex: 1;
+      padding: 20px;
+      overflow-y: auto;
+      background: #fafafa;
+      scroll-behavior: smooth;
+    }
+
+    .message {
+      display: flex;
+      margin-bottom: 16px;
+      animation: slideIn 0.3s ease;
+    }
+
+    .message.user {
+      justify-content: flex-end;
+    }
+
+    .message-bubble {
+      max-width: 70%;
+      padding: 12px 16px;
+      border-radius: 18px;
+      position: relative;
+      word-wrap: break-word;
+    }
+
+    .message.user .message-bubble {
+      background: linear-gradient(135deg, var(--primary) 0%, var(--primary-light) 100%);
+      color: white;
+      border-bottom-right-radius: 4px;
+    }
+
+    .message.opponent .message-bubble {
+      background: white;
+      border: 1px solid var(--border);
+      color: var(--dark);
+      border-bottom-left-radius: 4px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+    }
+
+    .message-sender {
+      font-size: 0.75rem;
+      font-weight: 600;
+      margin-bottom: 4px;
+      opacity: 0.8;
+    }
+
+    .message.user .message-sender {
+      color: white;
+    }
+
+    .message.opponent .message-sender {
+      color: var(--primary);
+    }
+
+    .system-message {
+      text-align: center;
+      color: var(--gray);
+      font-size: 0.85rem;
+      margin: 12px 0;
+      font-style: italic;
+    }
+
+    .typing-indicator {
+      padding: 12px 20px;
+      background: white;
+      border-top: 1px solid var(--border);
+      color: var(--gray);
+      font-size: 0.9rem;
+      font-style: italic;
+      min-height: 45px;
+      display: flex;
+      align-items: center;
+    }
+
+    .typing-dots {
+      display: inline-flex;
+      gap: 4px;
+      margin-left: 8px;
+    }
+
+    .typing-dots span {
+      width: 6px;
+      height: 6px;
+      background: var(--gray);
+      border-radius: 50%;
+      animation: typing 1.4s infinite;
+    }
+
+    .typing-dots span:nth-child(2) { animation-delay: 0.2s; }
+    .typing-dots span:nth-child(3) { animation-delay: 0.4s; }
+
+    @keyframes typing {
+      0%, 60%, 100% { opacity: 0.3; transform: translateY(0); }
+      30% { opacity: 1; transform: translateY(-6px); }
+    }
+
+    /* Chat Input */
+    .chat-input {
+      padding: 20px;
+      background: white;
+      border-top: 1px solid var(--border);
+      display: flex;
+      gap: 12px;
+    }
+
+    .chat-input input {
+      flex: 1;
+      padding: 12px 16px;
+      border: 2px solid var(--border);
+      border-radius: 24px;
+      font-size: 1rem;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+
+    .chat-input input:focus {
+      border-color: var(--primary);
+    }
+
+    .chat-input button {
+      padding: 12px 24px;
+      background: var(--primary);
+      color: white;
+      border: none;
+      border-radius: 24px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .chat-input button:hover:not(:disabled) {
+      background: var(--primary-dark);
+      transform: translateY(-1px);
+      box-shadow: var(--shadow);
+    }
+
+    .chat-input button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    /* Side Panel */
+    .side-panel {
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }
+
+    .panel-card {
+      background: white;
+      border-radius: 16px;
+      padding: 24px;
+      box-shadow: var(--shadow-lg);
+    }
+
+    .panel-title {
+      font-size: 1.1rem;
+      font-weight: 700;
+      margin-bottom: 16px;
+      color: var(--dark);
+    }
+
+    /* Timer Progress */
+    .timer-container {
+      margin-bottom: 16px;
+    }
+
+    .timer-label {
+      display: flex;
+      justify-content: space-between;
+      font-size: 0.85rem;
+      font-weight: 600;
+      margin-bottom: 8px;
+      color: var(--gray);
+    }
+
+    .timer-value {
+      font-size: 1.2rem;
+      font-weight: 700;
+    }
+
+    .progress-bar {
+      height: 8px;
+      background: var(--light-gray);
+      border-radius: 8px;
+      overflow: hidden;
+      margin-top: 8px;
+    }
+
+    .progress-fill {
+      height: 100%;
+      background: linear-gradient(90deg, var(--success) 0%, var(--success) 100%);
+      transition: width 1s linear, background 0.3s;
+      border-radius: 8px;
+    }
+
+    .progress-fill.warning {
+      background: linear-gradient(90deg, var(--warning) 0%, var(--warning) 100%);
+    }
+
+    .progress-fill.danger {
+      background: linear-gradient(90deg, var(--danger) 0%, var(--danger) 100%);
+      animation: pulse 1s infinite;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.7; }
+    }
+
+    /* Action Buttons */
+    .action-buttons {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .btn {
+      padding: 14px 20px;
+      border: none;
+      border-radius: 12px;
+      font-weight: 600;
+      font-size: 1rem;
+      cursor: pointer;
+      transition: all 0.2s;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      box-shadow: var(--shadow);
+    }
+
+    .btn:hover:not(:disabled) {
+      transform: translateY(-2px);
+      box-shadow: var(--shadow-lg);
+    }
+
+    .btn:active:not(:disabled) {
+      transform: translateY(0);
+    }
+
+    .btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    .btn-primary {
+      background: linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%);
+      color: white;
+    }
+
+    .btn-success {
+      background: linear-gradient(135deg, var(--success) 0%, #059669 100%);
+      color: white;
+    }
+
+    .btn-danger {
+      background: linear-gradient(135deg, var(--danger) 0%, #dc2626 100%);
+      color: white;
+    }
+
+    .btn-secondary {
+      background: white;
+      border: 2px solid var(--border);
+      color: var(--dark);
+    }
+
+    /* Score Display */
+    .score-display {
+      text-align: center;
+      padding: 20px;
+      background: linear-gradient(135deg, #f3f4f6 0%, #e5e7eb 100%);
+      border-radius: 12px;
+      margin-bottom: 16px;
+    }
+
+    .score-label {
+      font-size: 0.85rem;
+      color: var(--gray);
+      margin-bottom: 8px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      font-weight: 600;
+    }
+
+    .score-value {
+      font-size: 2.5rem;
+      font-weight: 800;
+      color: var(--primary);
+      line-height: 1;
+    }
+
+    .score-value.positive {
+      color: var(--success);
+      animation: scoreUp 0.5s ease;
+    }
+
+    .score-value.negative {
+      color: var(--danger);
+      animation: scoreDown 0.5s ease;
+    }
+
+    @keyframes scoreUp {
+      0% { transform: scale(1); }
+      50% { transform: scale(1.2); }
+      100% { transform: scale(1); }
+    }
+
+    @keyframes scoreDown {
+      0% { transform: scale(1); }
+      25% { transform: scale(0.9) rotate(-5deg); }
+      75% { transform: scale(0.9) rotate(5deg); }
+      100% { transform: scale(1) rotate(0); }
+    }
+
+    /* Overlay */
+    .overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.7);
+      backdrop-filter: blur(4px);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 1000;
+      animation: fadeIn 0.3s ease;
+    }
+
+    .overlay.active {
+      display: flex;
+    }
+
+    .overlay-content {
+      background: white;
+      padding: 40px;
+      border-radius: 24px;
+      box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+      text-align: center;
+      max-width: 400px;
+      animation: scaleIn 0.3s ease;
+    }
+
+    .overlay-icon {
+      font-size: 3rem;
+      margin-bottom: 16px;
+    }
+
+    .overlay-title {
+      font-size: 1.5rem;
+      font-weight: 700;
+      margin-bottom: 12px;
+      color: var(--dark);
+    }
+
+    .overlay-message {
+      color: var(--gray);
+      margin-bottom: 24px;
+      line-height: 1.6;
+    }
+
+    .spinner {
+      width: 40px;
+      height: 40px;
+      border: 4px solid var(--light-gray);
+      border-top-color: var(--primary);
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+      margin: 20px auto;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    /* Animations */
+    @keyframes fadeIn {
+      from { opacity: 0; }
+      to { opacity: 1; }
+    }
+
+    @keyframes fadeInDown {
+      from { opacity: 0; transform: translateY(-20px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    @keyframes slideIn {
+      from { opacity: 0; transform: translateX(-10px); }
+      to { opacity: 1; transform: translateX(0); }
+    }
+
+    @keyframes scaleIn {
+      from { opacity: 0; transform: scale(0.9); }
+      to { opacity: 1; transform: scale(1); }
+    }
+
+    /* Token Display */
+    .token-display {
+      font-size: 0.75rem;
+      color: var(--gray);
+      padding: 8px;
+      background: var(--light-gray);
+      border-radius: 8px;
+      word-break: break-all;
+      font-family: 'Courier New', monospace;
+    }
+
+    /* Pool Info */
+    .pool-info {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 12px;
+      background: var(--light-gray);
+      border-radius: 8px;
+      margin-bottom: 12px;
+    }
+
+    .pool-label {
+      font-size: 0.85rem;
+      color: var(--gray);
+      font-weight: 600;
+    }
+
+    .pool-count {
+      font-size: 1.2rem;
+      font-weight: 700;
+      color: var(--primary);
+    }
+
+    /* Commit Hash */
+    .commit-display {
+      font-size: 0.7rem;
+      font-family: 'Courier New', monospace;
+      color: var(--gray);
+      padding: 8px;
+      background: var(--light-gray);
+      border-radius: 6px;
+      word-break: break-all;
+      margin-top: 12px;
+    }
   </style>
 </head>
 <body>
-  <h1>Turring Test — Dev Client</h1>
+  <div class="container">
+    <!-- Header -->
+    <div class="header">
+      <h1>🤖 TurringChat</h1>
+      <div class="tagline">Can you spot the AI? You have 5 minutes to decide!</div>
+    </div>
 
-  <div class="stats" style="gap:16px">
-    <div class="badge">Round left: <span id="roundLeft">—</span>s</div>
-    <div id="turnBadge" class="badge">Turn left: <span id="turnLeft">—</span>s</span></div>
-    <div class="badge">Turn: <span id="turn">—</span></div>
-    <div class="badge">Commit: <code id="commitHash">—</code></div>
-    <div class="badge">Pool: <span id="poolCount" class="counter">0</span></div>
-    <div class="badge">Session — Games: <span id="sessGames" class="counter">0</span>, Credits: <span id="sessCredits" class="counter">0</span></div>
+    <!-- Stats Bar -->
+    <div class="stats-bar">
+      <div class="stat-card">
+        <div class="stat-label">Session Score</div>
+        <div class="stat-value" id="sessCredits">0</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Games Played</div>
+        <div class="stat-value success" id="sessGames">0</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Round Timer</div>
+        <div class="stat-value warning" id="roundLeft">—</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Turn Timer</div>
+        <div class="stat-value danger" id="turnLeft">—</div>
+      </div>
+    </div>
+
+    <!-- Game Container -->
+    <div class="game-container">
+      <!-- Chat Panel -->
+      <div class="chat-panel">
+        <div class="chat-header">
+          <div>
+            <div>Chat with Your Opponent</div>
+            <div class="chat-status" id="chatStatus">Waiting to start...</div>
+          </div>
+          <div style="font-size: 1.5rem">💬</div>
+        </div>
+
+        <div class="chat-messages" id="chatMessages"></div>
+
+        <div class="typing-indicator" id="typingIndicator"></div>
+
+        <div class="chat-input">
+          <input
+            type="text"
+            id="msgInput"
+            placeholder="Type your message..."
+            disabled
+          />
+          <button id="sendBtn" disabled>Send</button>
+        </div>
+      </div>
+
+      <!-- Side Panel -->
+      <div class="side-panel">
+        <!-- Game Controls -->
+        <div class="panel-card">
+          <div class="panel-title">Game Controls</div>
+
+          <div class="pool-info">
+            <span class="pool-label">Players in Pool</span>
+            <span class="pool-count" id="poolCount">0</span>
+          </div>
+
+          <div class="action-buttons">
+            <button class="btn btn-success" id="joinPoolBtn">Join Pool</button>
+            <button class="btn btn-secondary" id="leavePoolBtn" disabled>Leave Pool</button>
+            <button class="btn btn-primary" id="startBtn" disabled>🎮 Start Match</button>
+          </div>
+
+          <div class="token-display" id="tokenDisplay" style="margin-top: 12px;">No token</div>
+        </div>
+
+        <!-- Make Your Guess -->
+        <div class="panel-card">
+          <div class="panel-title">Make Your Guess</div>
+
+          <div class="action-buttons">
+            <button class="btn btn-success" id="guessHumanBtn" disabled>
+              👤 Guess HUMAN
+            </button>
+            <button class="btn btn-danger" id="guessAIBtn" disabled>
+              🤖 Guess AI
+            </button>
+          </div>
+
+          <div class="commit-display" id="commitHash">Commit: —</div>
+        </div>
+
+        <!-- Turn Progress -->
+        <div class="panel-card" id="turnPanel" style="display: none;">
+          <div class="panel-title">Turn Progress</div>
+
+          <div class="timer-container">
+            <div class="timer-label">
+              <span>Current Turn</span>
+              <span class="timer-value" id="turnDisplay">—</span>
+            </div>
+            <div class="progress-bar">
+              <div class="progress-fill" id="turnProgress"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
   </div>
 
-  <div id="typing" class="stats" style="min-height:22px;color:#666"></div>
-
-  <div id="log"></div>
-
-  <div class="row">
-    <input id="msg" type="text" placeholder="Type message… (Enter to send)" />
-    <button id="send" disabled>Send</button>
+  <!-- Overlay for matchmaking -->
+  <div class="overlay" id="overlay">
+    <div class="overlay-content">
+      <div class="overlay-icon">🔍</div>
+      <div class="overlay-title">Finding Opponent...</div>
+      <div class="overlay-message">
+        Searching for a match<br/>
+        <strong><span id="mmLeft">—</span>s</strong> remaining
+      </div>
+      <div class="spinner"></div>
+    </div>
   </div>
 
-  <div class="row">
-    <button id="joinPool">Join Pool</button>
-    <button id="leavePool" disabled>Leave Pool</button>
-    <span class="pill">Token: <code id="myToken">—</code></span>
-  </div>
-
-  <div class="row">
-    <button id="guessHuman" disabled>Guess HUMAN</button>
-    <button id="guessAI" disabled>Guess AI</button>
-    <button id="start" disabled style="margin-left:auto;">Start Match</button>
-    <button id="state" disabled>Get State</button>
-  </div>
-
-  <div id="overlay">
-    <div class="box">
-      <div class="big">Matchmaking in progress…</div>
-      <div class="sub">Looking for an opponent (up to <span id="mmWindow">—</span>s).<br/>Time left: <span id="mmLeft">—</span>s</div>
+  <!-- Game End Overlay -->
+  <div class="overlay" id="endOverlay">
+    <div class="overlay-content">
+      <div class="overlay-icon" id="endIcon">🎉</div>
+      <div class="overlay-title" id="endTitle">Game Over!</div>
+      <div class="overlay-message" id="endMessage"></div>
+      <button class="btn btn-primary" id="playAgainBtn" style="margin-top: 20px;">
+        Play Again
+      </button>
     </div>
   </div>
 
@@ -81,57 +726,116 @@ let pendingTicket = null;
 let pollTimer = null;
 let poolPollTimer = null;
 let matchmakingDeadline = 0;
+let MAX_TURN_SECONDS = 30;
+let currentTurnLeft = 0;
+let currentRoundLeft = 0;
 
 // UI refs
-const logEl = document.getElementById('log');
+const chatMessages = document.getElementById('chatMessages');
+const chatStatus = document.getElementById('chatStatus');
+const typingIndicator = document.getElementById('typingIndicator');
+const msgInput = document.getElementById('msgInput');
+const sendBtn = document.getElementById('sendBtn');
 const roundLeftEl = document.getElementById('roundLeft');
-const turnLeftEl  = document.getElementById('turnLeft');
-const turnEl      = document.getElementById('turn');
-const commitEl    = document.getElementById('commitHash');
-const typingEl    = document.getElementById('typing');
-const msgEl       = document.getElementById('msg');
-const sendBtn     = document.getElementById('send');
-const turnBadge   = document.getElementById('turnBadge');
+const turnLeftEl = document.getElementById('turnLeft');
+const turnDisplay = document.getElementById('turnDisplay');
+const turnProgress = document.getElementById('turnProgress');
+const turnPanel = document.getElementById('turnPanel');
 const poolCountEl = document.getElementById('poolCount');
 const sessGamesEl = document.getElementById('sessGames');
-const sessCredEl  = document.getElementById('sessCredits');
-const myTokenEl   = document.getElementById('myToken');
-const joinPoolBtn = document.getElementById('joinPool');
-const leavePoolBtn= document.getElementById('leavePool');
-const startBtn    = document.getElementById('start');
-const stateBtn    = document.getElementById('state');
-const guessHuman  = document.getElementById('guessHuman');
-const guessAI     = document.getElementById('guessAI');
-const overlay     = document.getElementById('overlay');
-const mmWindowEl  = document.getElementById('mmWindow');
-const mmLeftEl    = document.getElementById('mmLeft');
+const sessCredEl = document.getElementById('sessCredits');
+const tokenDisplay = document.getElementById('tokenDisplay');
+const commitHashEl = document.getElementById('commitHash');
+const joinPoolBtn = document.getElementById('joinPoolBtn');
+const leavePoolBtn = document.getElementById('leavePoolBtn');
+const startBtn = document.getElementById('startBtn');
+const guessHumanBtn = document.getElementById('guessHumanBtn');
+const guessAIBtn = document.getElementById('guessAIBtn');
+const overlay = document.getElementById('overlay');
+const endOverlay = document.getElementById('endOverlay');
+const mmLeftEl = document.getElementById('mmLeft');
+const endIcon = document.getElementById('endIcon');
+const endTitle = document.getElementById('endTitle');
+const endMessage = document.getElementById('endMessage');
+const playAgainBtn = document.getElementById('playAgainBtn');
 
-// timer coloring
-let MAX_TURN_SECONDS = 30;
-function setTurnColor(secLeft) {
-  turnBadge.classList.remove('timer-green','timer-orange','timer-red');
-  const redT    = Math.max(0, MAX_TURN_SECONDS - 10);
-  const orangeT = Math.max(0, MAX_TURN_SECONDS - 20);
-  if (secLeft > redT) turnBadge.classList.add('timer-green');
-  else if (secLeft > orangeT) turnBadge.classList.add('timer-orange');
-  else turnBadge.classList.add('timer-red');
+// Initialize
+updateTokenDisplay();
+updateSessionStats();
+startPoolPolling();
+
+function updateTokenDisplay() {
+  if (myToken) {
+    tokenDisplay.textContent = `Token: ${myToken.substring(0, 16)}...`;
+    leavePoolBtn.disabled = false;
+    startBtn.disabled = false;
+  } else {
+    tokenDisplay.textContent = 'No token yet';
+  }
 }
 
-// helper log
-function log(line) {
-  const atBottom = logEl.scrollTop + logEl.clientHeight >= logEl.scrollHeight - 5;
-  logEl.textContent += line + "\n";
-  if (atBottom) logEl.scrollTop = logEl.scrollHeight;
+function updateSessionStats() {
+  sessGamesEl.textContent = sessionGames;
+  const credEl = sessCredEl;
+  credEl.textContent = sessionCredits;
+  credEl.className = 'stat-value';
+  if (sessionCredits > 0) credEl.classList.add('positive');
+  else if (sessionCredits < 0) credEl.classList.add('negative');
 }
 
-// session stats updater
-function updateSession(delta = 0) {
-  sessionGamesEl.textContent = sessionGames;
-  sessionCredits += (delta || 0);
-  sessCredEl.textContent = sessionCredits;
+function addMessage(sender, text, isUser = false) {
+  const msgDiv = document.createElement('div');
+  msgDiv.className = `message ${isUser ? 'user' : 'opponent'}`;
+
+  const bubble = document.createElement('div');
+  bubble.className = 'message-bubble';
+
+  const senderLabel = document.createElement('div');
+  senderLabel.className = 'message-sender';
+  senderLabel.textContent = sender;
+
+  const textContent = document.createElement('div');
+  textContent.textContent = text;
+
+  bubble.appendChild(senderLabel);
+  bubble.appendChild(textContent);
+  msgDiv.appendChild(bubble);
+  chatMessages.appendChild(msgDiv);
+  chatMessages.scrollTop = chatMessages.scrollHeight;
 }
 
-// pool counter poller
+function addSystemMessage(text) {
+  const msgDiv = document.createElement('div');
+  msgDiv.className = 'system-message';
+  msgDiv.textContent = text;
+  chatMessages.appendChild(msgDiv);
+  chatMessages.scrollTop = chatMessages.scrollHeight;
+}
+
+function setTyping(isTyping) {
+  if (isTyping) {
+    typingIndicator.innerHTML = 'Opponent is typing<div class="typing-dots"><span></span><span></span><span></span></div>';
+  } else {
+    typingIndicator.innerHTML = '';
+  }
+}
+
+function updateTurnProgress() {
+  if (MAX_TURN_SECONDS > 0 && currentTurnLeft >= 0) {
+    const percentage = (currentTurnLeft / MAX_TURN_SECONDS) * 100;
+    turnProgress.style.width = `${percentage}%`;
+
+    turnProgress.className = 'progress-fill';
+    if (percentage > 66) {
+      // green
+    } else if (percentage > 33) {
+      turnProgress.classList.add('warning');
+    } else {
+      turnProgress.classList.add('danger');
+    }
+  }
+}
+
 async function pollPool() {
   try {
     const r = await fetch('/pool/count');
@@ -140,125 +844,141 @@ async function pollPool() {
   } catch(e) {}
 }
 
-// overlay control
-function showOverlay(windowSecs, leftSecs) {
-  mmWindowEl.textContent = Math.round(windowSecs);
-  mmLeftEl.textContent = Math.max(0, Math.round(leftSecs));
-  overlay.style.display = 'flex';
-}
-function hideOverlay() { overlay.style.display = 'none'; }
-
-// button state
-function setDuringMatchmaking(on) {
-  joinPoolBtn.disabled = on;
-  leavePoolBtn.disabled = on;
-  startBtn.disabled = on;
-  guessHuman.disabled = true;
-  guessAI.disabled = true;
-  stateBtn.disabled = true;
-  sendBtn.disabled = true;
-}
-function setDuringGame(on) {
-  joinPoolBtn.disabled = on;
-  leavePoolBtn.disabled = on;
-  startBtn.disabled = on;
-  guessHuman.disabled = !on? true : false;
-  guessAI.disabled = !on? true : false;
-  stateBtn.disabled = !on? true : false;
-  sendBtn.disabled = !on? true : false;
+function startPoolPolling() {
+  pollPool();
+  poolPollTimer = setInterval(pollPool, 2000);
 }
 
-function resetUI() {
-  roundLeftEl.textContent = '—';
-  turnLeftEl.textContent  = '—';
-  turnEl.textContent      = '—';
-  commitEl.textContent    = '—';
-  typingEl.textContent    = '';
-  setTurnColor(MAX_TURN_SECONDS);
+function showOverlay() {
+  overlay.classList.add('active');
 }
 
-// initial token display
-if (myToken) {
-  myTokenEl.textContent = myToken;
-  leavePoolBtn.disabled = false;
-  startBtn.disabled = false;
+function hideOverlay() {
+  overlay.classList.remove('active');
 }
 
-poolPollTimer = setInterval(pollPool, 2000);
-pollPool();
+function showEndOverlay(icon, title, message) {
+  endIcon.textContent = icon;
+  endTitle.textContent = title;
+  endMessage.innerHTML = message;
+  endOverlay.classList.add('active');
+}
 
-// join pool
+function hideEndOverlay() {
+  endOverlay.classList.remove('active');
+}
+
+function setGameState(state) {
+  // states: idle, matchmaking, playing, ended
+  if (state === 'idle') {
+    chatStatus.textContent = 'Waiting to start...';
+    msgInput.disabled = true;
+    sendBtn.disabled = true;
+    guessHumanBtn.disabled = true;
+    guessAIBtn.disabled = true;
+    turnPanel.style.display = 'none';
+  } else if (state === 'matchmaking') {
+    chatStatus.textContent = 'Finding opponent...';
+    joinPoolBtn.disabled = true;
+    leavePoolBtn.disabled = true;
+    startBtn.disabled = true;
+  } else if (state === 'playing') {
+    chatStatus.textContent = 'Game in progress';
+    msgInput.disabled = false;
+    sendBtn.disabled = false;
+    guessHumanBtn.disabled = false;
+    guessAIBtn.disabled = false;
+    joinPoolBtn.disabled = true;
+    leavePoolBtn.disabled = true;
+    startBtn.disabled = true;
+    turnPanel.style.display = 'block';
+  } else if (state === 'ended') {
+    chatStatus.textContent = 'Game ended';
+    msgInput.disabled = true;
+    sendBtn.disabled = true;
+    guessHumanBtn.disabled = true;
+    guessAIBtn.disabled = true;
+    joinPoolBtn.disabled = false;
+    leavePoolBtn.disabled = false;
+    startBtn.disabled = false;
+    turnPanel.style.display = 'none';
+  }
+}
+
+// Join pool
 joinPoolBtn.onclick = async () => {
   try {
     const r = await fetch('/pool/join', {
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
       body: JSON.stringify(myToken ? { token: myToken } : {})
     });
     const j = await r.json();
     if (j.ok) {
       myToken = j.token;
       localStorage.setItem('turring_token', myToken);
-      myTokenEl.textContent = myToken;
-      leavePoolBtn.disabled = false;
-      startBtn.disabled = false; // unlocked
-      log('Joined pool.');
+      updateTokenDisplay();
+      addSystemMessage('✓ Joined the pool');
       pollPool();
     } else {
-      log('Join failed.');
+      addSystemMessage('✗ Failed to join pool');
     }
   } catch(e) {
-    log('Join error: ' + e);
+    addSystemMessage('✗ Error joining pool');
   }
 };
 
-// leave pool
+// Leave pool
 leavePoolBtn.onclick = async () => {
+  if (!myToken) return;
   try {
-    if (!myToken) return;
     await fetch('/pool/leave', {
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({ token: myToken })
     });
-    log('Left pool.');
+    addSystemMessage('✓ Left the pool');
     pollPool();
   } catch(e) {}
 };
 
-// start matchmaking
+// Start matchmaking
 startBtn.onclick = async () => {
   if (!myToken) {
-    log('Join the pool first.');
+    addSystemMessage('⚠ Join the pool first');
     return;
   }
   if (ws && ws.readyState === WebSocket.OPEN) {
-    log('Already in a game.');
+    addSystemMessage('⚠ Already in a game');
     return;
   }
-  resetUI();
-  setDuringMatchmaking(true);
+
+  chatMessages.innerHTML = '';
+  roundLeftEl.textContent = '—';
+  turnLeftEl.textContent = '—';
+  turnDisplay.textContent = '—';
+  commitHashEl.textContent = 'Commit: —';
+
+  setGameState('matchmaking');
+  showOverlay();
+
   try {
     const r = await fetch('/match/request', {
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({ token: myToken })
     });
     const j = await r.json();
     pendingTicket = j.ticket;
-    const deadline = j.expires_at * 1000; // seconds -> ms (server used time.time() + window)
     matchmakingDeadline = Date.now() + Math.max(0, j.expires_at - Math.floor(Date.now()/1000)) * 1000;
-    const windowSecs = Math.max(5, Math.round(j.expires_at - Math.floor(Date.now()/1000)));
-    showOverlay(windowSecs, windowSecs);
 
-    // poll status
+    // Poll status
     if (pollTimer) clearInterval(pollTimer);
     pollTimer = setInterval(async () => {
       try {
         const rr = await fetch(`/match/status?ticket=${encodeURIComponent(pendingTicket)}`);
         const sj = await rr.json();
 
-        // update overlay countdown
         const tl = Math.max(0, Math.round((matchmakingDeadline - Date.now())/1000));
         mmLeftEl.textContent = tl;
 
@@ -267,21 +987,19 @@ startBtn.onclick = async () => {
           if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
           connectWS(sj.ws_url, sj.commit_hash);
         } else if (sj.status === 'pending') {
-          // still waiting
-        } else if (sj.status === 'canceled' || sj.status === 'gone') {
+          // waiting
+        } else {
           hideOverlay();
           if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
-          setDuringMatchmaking(false);
-          log('Matchmaking canceled/gone.');
+          setGameState('idle');
+          addSystemMessage('Matchmaking canceled');
         }
-      } catch(e) {
-        // ignore transient errors
-      }
+      } catch(e) {}
     }, 750);
   } catch(e) {
-    setDuringMatchmaking(false);
+    setGameState('idle');
     hideOverlay();
-    log('Start matchmaking error: ' + e);
+    addSystemMessage('✗ Matchmaking error');
   }
 };
 
@@ -289,97 +1007,127 @@ function connectWS(url, commitHash) {
   if (ws && ws.readyState === WebSocket.OPEN) {
     try { ws.close(); } catch(e){}
   }
-  commitEl.textContent = commitHash || '—';
+
+  commitHashEl.textContent = `Commit: ${commitHash ? commitHash.substring(0, 16) + '...' : '—'}`;
 
   const full = url.startsWith('ws') ? url : `ws://${location.host}${url}`;
   ws = new WebSocket(full);
-  ws.onopen = () => { log('WS connected'); typingEl.textContent=''; setDuringGame(true); };
-  ws.onclose = () => { log('WS closed'); typingEl.textContent=''; setDuringGame(false); };
+
+  ws.onopen = () => {
+    addSystemMessage('🎮 Match started!');
+    setGameState('playing');
+    setTyping(false);
+  };
+
+  ws.onclose = () => {
+    addSystemMessage('Connection closed');
+    setGameState('ended');
+    setTyping(false);
+  };
+
   ws.onmessage = ev => {
     try {
       const data = JSON.parse(ev.data);
 
       if (data.type === 'match_start') {
         if (typeof data.turn_seconds === 'number') MAX_TURN_SECONDS = data.turn_seconds;
-        setTurnColor(MAX_TURN_SECONDS);
-        turnLeftEl.textContent = MAX_TURN_SECONDS;
-        log(`Match started. Opponent hidden. You are A. (${data.round_seconds}s round / ${MAX_TURN_SECONDS}s turn)`);
+        currentTurnLeft = MAX_TURN_SECONDS;
+        updateTurnProgress();
+        addSystemMessage(`Round: ${data.round_seconds}s | Turn: ${MAX_TURN_SECONDS}s`);
       }
 
       if (data.type === 'tick') {
-        roundLeftEl.textContent = data.round_left;
-        turnLeftEl.textContent  = data.turn_left;
-        turnEl.textContent      = data.turn;
-        setTurnColor(Number(data.turn_left || 0));
+        currentRoundLeft = data.round_left;
+        currentTurnLeft = data.turn_left;
+        roundLeftEl.textContent = `${data.round_left}s`;
+        turnLeftEl.textContent = `${data.turn_left}s`;
+        turnDisplay.textContent = data.turn;
+        updateTurnProgress();
       }
 
       if (data.type === 'typing') {
-        typingEl.textContent = data.on ? 'B is typing…' : '';
+        setTyping(data.on);
       }
 
       if (data.type === 'chat') {
-        log(`${data.from_}: ${data.text}`);
+        const isUser = data.from_ === 'A';
+        addMessage(isUser ? 'You' : 'Opponent', data.text, isUser);
       }
 
       if (data.type === 'state') {
-        log(`STATE: opponent(hidden) round_left=${data.round_left} turn_left=${data.turn_left} turn=${data.turn}`);
-        setTurnColor(Number(data.turn_left || 0));
+        addSystemMessage(`State: Round ${data.round_left}s | Turn ${data.turn_left}s | ${data.turn}`);
       }
 
       if (data.type === 'end') {
         const delta = Number(data.score_delta || 0);
         sessionGames += 1;
-        updateSession(delta);
-        log(`GAME END — reason=${data.reason} ${'winner' in data ? 'winner='+data.winner : ''} score_delta=${delta}`);
+        sessionCredits += delta;
+        updateSessionStats();
+
+        let icon = '🎉';
+        let title = 'Game Over!';
+        let msg = `<strong>Reason:</strong> ${data.reason}<br/>`;
+        msg += `<strong>Score:</strong> ${delta > 0 ? '+' : ''}${delta}<br/>`;
+
         if (data.reveal) {
-          log(`REVEAL: opponent=${data.reveal.opponent_type} nonce=${data.reveal.nonce} ts=${data.reveal.commit_ts}`);
-          log(`Verify: sha256(opponent|nonce|ts) == commit (${commitEl.textContent})`);
+          msg += `<br/><strong>Opponent was:</strong> ${data.reveal.opponent_type}`;
+          if (data.winner === 'A') {
+            icon = '🎉';
+            title = 'You Won!';
+          } else if (data.winner === 'B') {
+            icon = '😢';
+            title = 'You Lost!';
+          }
         }
-        typingEl.textContent = '';
-        setDuringGame(false);
-        startBtn.disabled = false; // allow new round
+
+        setGameState('ended');
+        setTyping(false);
+        showEndOverlay(icon, title, msg);
       }
     } catch (e) {
-      log('parse error: ' + e);
+      console.error('Parse error:', e);
     }
   };
 }
 
-// click to send
+// Send message
 sendBtn.onclick = () => {
   if (!ws || ws.readyState !== WebSocket.OPEN) return;
-  const v = msgEl.value.trim();
+  const v = msgInput.value.trim();
   if (!v) return;
   ws.send(JSON.stringify({type: 'chat', text: v}));
-  log(`A: ${v}`);
-  msgEl.value = '';
-  msgEl.focus();
+  addMessage('You', v, true);
+  msgInput.value = '';
+  msgInput.focus();
 };
 
-// ENTER to send
-msgEl.addEventListener('keydown', (e) => {
+msgInput.addEventListener('keydown', (e) => {
   if (e.key === 'Enter') {
     e.preventDefault();
     sendBtn.click();
   }
 });
 
-guessHuman.onclick = () => {
+// Guess buttons
+guessHumanBtn.onclick = () => {
   if (!ws || ws.readyState !== WebSocket.OPEN) return;
   ws.send(JSON.stringify({type: 'guess', guess: 'HUMAN'}));
+  addSystemMessage('You guessed: HUMAN');
 };
 
-guessAI.onclick = () => {
+guessAIBtn.onclick = () => {
   if (!ws || ws.readyState !== WebSocket.OPEN) return;
   ws.send(JSON.stringify({type: 'guess', guess: 'AI'}));
+  addSystemMessage('You guessed: AI');
 };
 
-stateBtn.onclick = () => {
-  if (!ws || ws.readyState !== WebSocket.OPEN) return;
-  ws.send(JSON.stringify({type: 'state'}));
+// Play again
+playAgainBtn.onclick = () => {
+  hideEndOverlay();
+  chatMessages.innerHTML = '';
 };
 
-// leave the pool when closing the tab
+// Cleanup
 window.addEventListener('beforeunload', async () => {
   try {
     if (myToken) {
