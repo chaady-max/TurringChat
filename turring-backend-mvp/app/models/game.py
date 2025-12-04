@@ -9,6 +9,7 @@ from fastapi import WebSocket
 
 from app.constants import OpponentType, Role
 from app.utils.commit_reveal import commit_assignment
+from app.utils.mood import MoodState
 
 
 # In-memory state stores
@@ -83,6 +84,9 @@ class GameState:
         self.score_a = 0
         self.score_b = 0
         self.ended = False
+
+        # AI mood state (for adaptive conversation)
+        self.ai_mood = MoodState()
 
         # Persona per match
         self.nonce = secrets.token_hex(16)

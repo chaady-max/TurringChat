@@ -24,6 +24,7 @@ from app.services.ai_service import ai_reply
 from app.services.matchmaking_service import commit_selection
 from app.services.conversation_logger import logger as conversation_logger
 from app.utils.websocket_utils import ws_send
+from app.utils.mood import analyze_user_style, update_mood
 
 
 # --- Game scoring constants ---
@@ -115,6 +116,11 @@ async def run_game_ai(ws: WebSocket, preset_commit: Optional[dict[str, Any]] = N
                 game.history.append(f"A: {text}")
                 # Log player message
                 conversation.add_message("player", text, time.time())
+
+                # Analyze user style and update AI mood
+                style = analyze_user_style(text)
+                game.ai_mood = update_mood(game.ai_mood, style)
+
                 game.swap_turn()
 
                 if not game.ended:
@@ -124,7 +130,7 @@ async def run_game_ai(ws: WebSocket, preset_commit: Optional[dict[str, Any]] = N
                     if pre > 0:
                         await asyncio.sleep(pre)
 
-                    reply = await ai_reply(game.history[-8:], game.persona, APP_VERSION)
+                    reply = await ai_reply(game.history[-8:], game.persona, APP_VERSION, game.ai_mood)
 
                     post = min(0.6, max(0.0, game.time_left_turn() - 1.5))
                     if post > 0:

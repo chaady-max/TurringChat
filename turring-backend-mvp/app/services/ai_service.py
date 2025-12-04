@@ -15,13 +15,15 @@ from typing import Optional
 from app.config import settings
 from app.utils.humanization import humanize_reply
 from app.services.openai_usage_tracker import tracker
+from app.utils.mood import MoodState, build_mood_instructions, get_generation_params
 
 
 # --- OpenAI async client (Responses API) ---
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
-LLM_MODEL = os.getenv("LLM_MODEL", "gpt-4o-mini")
-LLM_TIMEOUT = float(os.getenv("LLM_TIMEOUT_SECONDS", "8"))
-LLM_TEMPERATURE = float(os.getenv("LLM_TEMPERATURE", "0.7"))
+# Use settings object instead of os.getenv to ensure .env is loaded properly
+OPENAI_API_KEY = settings.openai_api_key
+LLM_MODEL = settings.llm_model
+LLM_TIMEOUT = settings.llm_timeout_seconds
+LLM_TEMPERATURE = settings.llm_temperature
 
 oai = None
 if OPENAI_API_KEY:
@@ -49,7 +51,7 @@ VERSION_TRIGGERS = [
 ]
 
 # --- Global humanization knobs (env overridable) ---
-LLM_MAX_WORDS = int(os.getenv("LLM_MAX_WORDS", "12"))
+LLM_MAX_WORDS = settings.llm_max_words
 
 
 def simple_local_bot(history: list[str]) -> str:
@@ -129,16 +131,18 @@ def style_hints_from_user(history: list[str], persona: Optional[dict] = None) ->
     return " ".join(hints)
 
 
-async def ai_reply(history: list[str], persona: dict, app_version: str = "2") -> str:
-    """Generate an AI response based on conversation history and persona.
+async def ai_reply(history: list[str], persona: dict, app_version: str = "2",
+                   mood: Optional[MoodState] = None) -> str:
+    """Generate an AI response based on conversation history, persona, and mood.
 
     Args:
         history: List of chat messages in format "A: message" or "B: message"
         persona: Persona dict with demographics and communication style
         app_version: Application version to return for version queries
+        mood: Optional mood state to adjust conversational tone and style
 
     Returns:
-        A humanized AI response that fits the persona
+        A humanized AI response that fits the persona and current mood
     """
     last_a_raw = ""
     for line in reversed(history):
@@ -158,6 +162,15 @@ async def ai_reply(history: list[str], persona: dict, app_version: str = "2") ->
 
     being_probed = any(t in lower_last for t in DETECTION_TRIGGERS)
     style_hints = style_hints_from_user(history, persona)
+
+    # Get mood-based generation parameters (if mood provided)
+    if mood:
+        gen_params = get_generation_params(mood, base_temperature=LLM_TEMPERATURE, base_max_words=LLM_MAX_WORDS)
+        temperature = gen_params["temperature"]
+        max_words = gen_params["max_words"]
+    else:
+        temperature = LLM_TEMPERATURE
+        max_words = LLM_MAX_WORDS
 
     persona_brief = (
         f"You're {persona['name']}, {persona['age']} years old. Originally from {persona['hometown']}, "
@@ -196,7 +209,12 @@ async def ai_reply(history: list[str], persona: dict, app_version: str = "2") ->
     else:
         defense_style = "Just be yourself and chat naturally."
 
-    cap = persona.get("reply_word_cap", LLM_MAX_WORDS)
+    # Add mood-based tone instructions (if mood provided)
+    mood_instructions = ""
+    if mood:
+        mood_instructions = build_mood_instructions(mood)
+
+    cap = persona.get("reply_word_cap", max_words)
     convo = "\n".join(history[-12:])  # More context
 
     prompt = (
@@ -204,6 +222,13 @@ async def ai_reply(history: list[str], persona: dict, app_version: str = "2") ->
         f"{natural_behavior}\n\n"
         f"{identity_protection}\n\n"
         f"{defense_style}\n\n"
+    )
+
+    # Add mood instructions if present
+    if mood_instructions:
+        prompt += f"{mood_instructions}\n\n"
+
+    prompt += (
         f"{style_hints}\n\n"
         f"Recent conversation:\n{convo}\n\n"
         f"Respond naturally as {persona['name']}. Keep it to 1-2 sentences, around {cap}-{cap+8} words. "
@@ -212,21 +237,23 @@ async def ai_reply(history: list[str], persona: dict, app_version: str = "2") ->
 
     try:
         start_time = time.time()
-        resp = await oai.responses.create(
+        resp = await oai.chat.completions.create(
             model=LLM_MODEL,
-            instructions="You're a real person having a casual text conversation. Be natural, spontaneous, and authentic. Never break character.",
-            input=prompt,
-            temperature=LLM_TEMPERATURE,
-            max_output_tokens=100,  # Increased for more natural responses
+            messages=[
+                {"role": "system", "content": "You're a real person having a casual text conversation. Be natural, spontaneous, and authentic. Never break character."},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=temperature,  # Mood-adjusted temperature
+            max_tokens=100,  # Increased for more natural responses
         )
         response_time = time.time() - start_time
 
         # Extract usage information if available
         usage = getattr(resp, "usage", None)
         if usage:
-            prompt_tokens = getattr(usage, "prompt_tokens", 0) or getattr(usage, "input_tokens", 0)
-            completion_tokens = getattr(usage, "completion_tokens", 0) or getattr(usage, "output_tokens", 0)
-            total_tokens = getattr(usage, "total_tokens", 0) or (prompt_tokens + completion_tokens)
+            prompt_tokens = getattr(usage, "prompt_tokens", 0)
+            completion_tokens = getattr(usage, "completion_tokens", 0)
+            total_tokens = getattr(usage, "total_tokens", 0)
 
             # Log API usage
             try:
@@ -242,7 +269,8 @@ async def ai_reply(history: list[str], persona: dict, app_version: str = "2") ->
                 # Don't fail the response if logging fails
                 print(f"Failed to log API usage: {log_err}")
 
-        text = (getattr(resp, "output_text", "") or "").strip()
+        text = resp.choices[0].message.content.strip()
         return humanize_reply(text, max_words=cap+8, persona=persona) or "ok"
-    except Exception:
+    except Exception as e:
+        print(f"OpenAI API error: {e}")
         return humanize_reply(simple_local_bot(history), max_words=LLM_MAX_WORDS, persona=persona)
