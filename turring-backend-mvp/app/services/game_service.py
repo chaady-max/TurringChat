@@ -12,14 +12,17 @@ import asyncio
 import json
 import os
 import random
+import time
 from typing import Any, Optional
 
 from fastapi import WebSocket
 from starlette.websockets import WebSocketDisconnect
 
 from app.models.game import GameState
+from app.models.conversation import ConversationSession
 from app.services.ai_service import ai_reply
 from app.services.matchmaking_service import commit_selection
+from app.services.conversation_logger import logger as conversation_logger
 from app.utils.websocket_utils import ws_send
 
 
@@ -46,6 +49,17 @@ async def run_game_ai(ws: WebSocket, preset_commit: Optional[dict[str, Any]] = N
         preset_commit: Optional preset commit-reveal data for fairness verification
     """
     game = GameState(ws_a=ws, ws_b=None, opponent_type="AI", preset_commit=preset_commit)
+
+    # Create conversation log session
+    import uuid
+    session_id = f"ai_{str(uuid.uuid4())[:8]}_{int(time.time())}"
+    conversation = ConversationSession(
+        session_id=session_id,
+        started_at=time.time(),
+        opponent_type="ai",
+        persona_name=game.persona.get("name", "Unknown"),
+        persona_details=game.persona
+    )
 
     await ws_send(
         ws,
@@ -99,6 +113,8 @@ async def run_game_ai(ws: WebSocket, preset_commit: Optional[dict[str, Any]] = N
                 if not text:
                     continue
                 game.history.append(f"A: {text}")
+                # Log player message
+                conversation.add_message("player", text, time.time())
                 game.swap_turn()
 
                 if not game.ended:
@@ -116,6 +132,8 @@ async def run_game_ai(ws: WebSocket, preset_commit: Optional[dict[str, Any]] = N
 
                     await ws_send(game.ws_a, "typing", who="B", on=False)
                     game.history.append(f"B: {reply}")
+                    # Log AI message
+                    conversation.add_message("opponent", reply, time.time())
                     await ws_send(game.ws_a, "chat", from_="B", text=reply)
                     game.swap_turn()
 
@@ -124,6 +142,10 @@ async def run_game_ai(ws: WebSocket, preset_commit: Optional[dict[str, Any]] = N
                 correct = (guess == "AI")
                 delta = SCORE_CORRECT if correct else SCORE_WRONG
                 game.score_a += delta
+
+                # Log guess outcome
+                conversation.set_outcome(player_guessed=guess.lower(), guess_correct=correct)
+
                 await ws_send(
                     game.ws_a, "end",
                     reason="guess", correct=correct,
@@ -147,6 +169,13 @@ async def run_game_ai(ws: WebSocket, preset_commit: Optional[dict[str, Any]] = N
     finally:
         if not ticker_task.done():
             ticker_task.cancel()
+
+        # Save conversation log
+        conversation.end_session(time.time())
+        try:
+            conversation_logger.save_session(conversation)
+        except Exception as e:
+            print(f"Error saving conversation {session_id}: {e}")
 
 
 async def run_game_h2h(game: GameState):

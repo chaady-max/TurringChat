@@ -57,6 +57,34 @@
       font-weight: 500;
     }
 
+    /* Admin Button */
+    .admin-btn {
+      position: fixed;
+      top: 20px;
+      right: 20px;
+      background: rgba(255, 255, 255, 0.2);
+      color: white;
+      border: 2px solid rgba(255, 255, 255, 0.3);
+      padding: 10px 20px;
+      border-radius: 8px;
+      text-decoration: none;
+      font-weight: 600;
+      font-size: 0.9rem;
+      transition: all 0.3s ease;
+      backdrop-filter: blur(10px);
+      z-index: 1000;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .admin-btn:hover {
+      background: rgba(255, 255, 255, 0.3);
+      border-color: rgba(255, 255, 255, 0.5);
+      transform: translateY(-2px);
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    }
+
     /* Stats Bar */
     .stats-bar {
       background: white;
@@ -584,6 +612,12 @@
   </style>
 </head>
 <body>
+  <!-- Admin Button -->
+  <a href="/static/admin.html" class="admin-btn">
+    <span>⚙️</span>
+    <span>Admin</span>
+  </a>
+
   <div class="container">
     <!-- Header -->
     <div class="header">

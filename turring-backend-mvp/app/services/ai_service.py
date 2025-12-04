@@ -9,10 +9,12 @@ This module handles all AI-related functionality including:
 
 import os
 import secrets
+import time
 from typing import Optional
 
 from app.config import settings
 from app.utils.humanization import humanize_reply
+from app.services.openai_usage_tracker import tracker
 
 
 # --- OpenAI async client (Responses API) ---
@@ -209,6 +211,7 @@ async def ai_reply(history: list[str], persona: dict, app_version: str = "2") ->
     )
 
     try:
+        start_time = time.time()
         resp = await oai.responses.create(
             model=LLM_MODEL,
             instructions="You're a real person having a casual text conversation. Be natural, spontaneous, and authentic. Never break character.",
@@ -216,6 +219,29 @@ async def ai_reply(history: list[str], persona: dict, app_version: str = "2") ->
             temperature=LLM_TEMPERATURE,
             max_output_tokens=100,  # Increased for more natural responses
         )
+        response_time = time.time() - start_time
+
+        # Extract usage information if available
+        usage = getattr(resp, "usage", None)
+        if usage:
+            prompt_tokens = getattr(usage, "prompt_tokens", 0) or getattr(usage, "input_tokens", 0)
+            completion_tokens = getattr(usage, "completion_tokens", 0) or getattr(usage, "output_tokens", 0)
+            total_tokens = getattr(usage, "total_tokens", 0) or (prompt_tokens + completion_tokens)
+
+            # Log API usage
+            try:
+                tracker.log_api_call(
+                    model=LLM_MODEL,
+                    prompt_tokens=prompt_tokens,
+                    completion_tokens=completion_tokens,
+                    total_tokens=total_tokens,
+                    session_id=persona.get("name", "unknown"),
+                    response_time=response_time
+                )
+            except Exception as log_err:
+                # Don't fail the response if logging fails
+                print(f"Failed to log API usage: {log_err}")
+
         text = (getattr(resp, "output_text", "") or "").strip()
         return humanize_reply(text, max_words=cap+8, persona=persona) or "ok"
     except Exception:

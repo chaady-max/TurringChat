@@ -6,7 +6,7 @@ from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
 # Import routers
-from app.routers import health, pool, matchmaking, websocket
+from app.routers import health, pool, matchmaking, websocket, admin
 
 # =========================
 # App version (answers "what version are you")
@@ -64,3 +64,4 @@ app.include_router(health.router)
 app.include_router(pool.router)
 app.include_router(matchmaking.router)
 app.include_router(websocket.router)
+app.include_router(admin.router)
